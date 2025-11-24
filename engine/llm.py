@@ -1,4 +1,6 @@
 import os
+from typing import Optional
+
 from openai import OpenAI
 
 
@@ -8,10 +10,14 @@ class LLMNotConfigured(Exception):
 
 
 def _get_client() -> OpenAI:
+    """
+    Create an OpenAI client using the OPENAI_API_KEY from environment / Streamlit secrets.
+    """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise LLMNotConfigured(
-            "AI is not configured yet. Set OPENAI_API_KEY in Streamlit → Settings → Secrets."
+            "AI is not configured yet. Please add your OpenAI API key as "
+            "OPENAI_API_KEY in Streamlit → Settings → Secrets."
         )
     return OpenAI(api_key=api_key)
 
@@ -23,15 +29,16 @@ def generate_ai_analysis(
 ) -> str:
     """
     Ask the LLM for a structured, consulting-style deep dive.
+    Returns markdown text.
     """
 
     client = _get_client()
 
     system_msg = (
         "You are a senior Finance Transformation consultant (Big 4 / MBB style). "
-        "Your client is a CFO or Global Process Owner. "
-        "You specialise in R2R, P2P, O2C, Intercompany, Consolidation and FP&A. "
-        "Respond in concise, well-structured markdown. No fluff."
+        "Your client is a CFO or Global Process Owner. You specialise in R2R, "
+        "Intercompany, Consolidation, P2P, O2C and FP&A. Respond in concise, "
+        "well-structured markdown. No fluff."
     )
 
     user_msg = f"""
@@ -68,17 +75,17 @@ Using this as a starting point, produce a **short consulting brief** with the fo
    - 5–8 KPIs a CFO should track (cycle time, IC breaks, close quality, etc.).
 
 Write in **clear bullet points**, no more than ~600–700 words total.
-Do not invent system names or vendors unless obviously generic (e.g. “ERP”, “consolidation tool”).
+Do not invent specific vendor names unless generic (e.g. “ERP”, “consolidation tool”).
 """
 
     response = client.chat.completions.create(
-        model="gpt-4o-mini",  # or whatever model you're using
+        model="gpt-4o-mini",  # use the cheaper, smart model
+        temperature=0.3,
+        max_tokens=900,
         messages=[
             {"role": "system", "content": system_msg},
             {"role": "user", "content": user_msg},
         ],
-        temperature=0.3,
-        max_tokens=900,
     )
 
     return response.choices[0].message.content.strip()
