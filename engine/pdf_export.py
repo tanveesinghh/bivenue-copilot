@@ -1,234 +1,222 @@
-from io import BytesIO
-from textwrap import wrap
-from typing import Optional
+# engine/pdf_export.py
 
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.units import cm
+from __future__ import annotations
+
+import io
+from pathlib import Path
+
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
 from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
+from reportlab.platypus import Frame, Paragraph
 
 
-# --- Brand colours (adjust if you like) ---
-
-DARK_BLUE_HEX = "#002B5C"   # main header colour
-ACCENT_HEX = "#00CFFF"      # curved-line / accent colour
+DARK_BLUE = colors.HexColor("#003366")
+ACCENT_BLUE = colors.HexColor("#00B4FF")
 
 
-def _hex_to_rgb01(hex_color: str):
-    """Convert #RRGGBB -> (r, g, b) in 0–1 range for reportlab."""
-    hex_color = hex_color.lstrip("#")
-    r = int(hex_color[0:2], 16) / 255.0
-    g = int(hex_color[2:4], 16) / 255.0
-    b = int(hex_color[4:6], 16) / 255.0
-    return r, g, b
+def _make_styles():
+    styles = getSampleStyleSheet()
+
+    title = ParagraphStyle(
+        "Title",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        leading=22,
+        textColor=colors.white,
+        alignment=TA_LEFT,
+    )
+
+    subtitle = ParagraphStyle(
+        "Subtitle",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=10,
+        leading=12,
+        textColor=colors.white,
+        alignment=TA_LEFT,
+    )
+
+    h4 = ParagraphStyle(
+        "H4",
+        parent=styles["Heading4"],
+        fontName="Helvetica-Bold",
+        fontSize=11,
+        leading=13,
+        textColor=DARK_BLUE,
+        spaceAfter=4,
+    )
+
+    body = ParagraphStyle(
+        "Body",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=11,
+        textColor=colors.black,
+        alignment=TA_LEFT,
+    )
+
+    footer = ParagraphStyle(
+        "Footer",
+        parent=styles["Normal"],
+        fontName="Helvetica-Oblique",
+        fontSize=7,
+        leading=9,
+        textColor=DARK_BLUE,
+        alignment=TA_LEFT,
+    )
+
+    return {"title": title, "subtitle": subtitle, "h4": h4, "body": body, "footer": footer}
 
 
-def _draw_wrapped_text(
-    c: canvas.Canvas,
-    text: str,
-    x: float,
-    y: float,
-    max_width: float,
-    font_name: str = "Helvetica",
-    font_size: int = 9,
-    leading: Optional[float] = None,
-):
-    """
-    Simple text wrapper: draw multi-line text within max_width.
-    Returns the final y-coordinate after drawing.
-    """
-    if leading is None:
-        leading = font_size + 2
-
-    c.setFont(font_name, font_size)
-
-    # crude width estimate: assume ~0.5 * font_size per character
-    avg_char_width = font_size * 0.5
-    max_chars = int(max_width / avg_char_width)
-    lines = []
-    for paragraph in text.split("\n"):
-        if not paragraph.strip():
-            lines.append("")
-            continue
-        lines.extend(wrap(paragraph, width=max_chars))
-
-    for line in lines:
-        c.drawString(x, y, line)
-        y -= leading
-
-    return y
-
-
-def create_consulting_brief_pdf(
+def build_brief_pdf(
     *,
-    logo_path: str,
-    domain: str,
     challenge: str,
-    rule_based_summary: str,
+    domain: str,
+    rule_summary: str,
     ai_brief: str,
-    company_name: str = "Client Name",
+    client_name: str = "Butterfield-style Client",
     industry: str = "Finance",
-    revenue: Optional[str] = None,
-    employees: Optional[str] = None,
-) -> BytesIO:
+    logo_path: str = "assets/bivenue_logo.png",
+) -> bytes:
     """
-    Create a 1-page, branded PDF consulting brief.
-
-    Layout A:
-    - Top dark-blue banner with logo & Bivenue Copilot
-    - Right-hand company info box
-    - Three content boxes:
-        1) Mission-critical priority
-        2) How Bivenue helped
-        3) Outcome
+    Build a single-page consulting brief PDF in Bivenue style.
+    Returns the PDF bytes so Streamlit can offer it as download.
     """
-    # --- Canvas setup (A4 landscape) ---
-    page = landscape(A4)
-    width, height = page
-    buf = BytesIO()
-    c = canvas.Canvas(buf, pagesize=page)
 
-    dark_r, dark_g, dark_b = _hex_to_rgb01(DARK_BLUE_HEX)
-    accent_r, accent_g, accent_b = _hex_to_rgb01(ACCENT_HEX)
+    styles = _make_styles()
+    buffer = io.BytesIO()
 
-    # --- Header bar ---
-    header_height = 3 * cm
-    c.setFillColorRGB(dark_r, dark_g, dark_b)
-    c.rect(0, height - header_height, width, header_height, fill=1, stroke=0)
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
 
-    # Accent line below header (thin turquoise stripe)
-    c.setFillColorRGB(accent_r, accent_g, accent_b)
-    c.rect(0, height - header_height - 0.25 * cm, width, 0.25 * cm, fill=1, stroke=0)
+    # --- HEADER BAND ---------------------------------------------------------
+    header_h = 3 * cm
+    c.setFillColor(DARK_BLUE)
+    c.rect(0, height - header_h, width, header_h, fill=1, stroke=0)
 
-    # --- Logo on the left ---
-    try:
-        logo = ImageReader(logo_path)
-        logo_width = 3.2 * cm
-        logo_height = 3.2 * cm
-        c.drawImage(
-            logo,
-            1 * cm,
-            height - header_height + (header_height - logo_height) / 2,
-            width=logo_width,
-            height=logo_height,
-            preserveAspectRatio=True,
-            mask="auto",
-        )
-    except Exception:
-        # If logo can't be loaded, fail silently and continue.
-        pass
+    # logo (optional)
+    logo_file = Path(logo_path)
+    if logo_file.is_file():
+        try:
+            # small logo on left
+            c.drawImage(
+                str(logo_file),
+                1 * cm,
+                height - header_h + 0.5 * cm,
+                width=3 * cm,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+        except Exception:
+            # if logo fails, we just skip it
+            pass
 
-    # --- Title text on header ---
+    # title + subtitle
+    title_x = 5 * cm
+    title_y = height - 1.2 * cm
+    Paragraph("Bivenue Copilot", styles["title"]).wrapOn(c, width - title_x - 1 * cm, 20)
+    Paragraph("Intercompany Consulting Brief", styles["subtitle"]).wrapOn(
+        c, width - title_x - 1 * cm, 20
+    )
+
+    Paragraph("Bivenue Copilot", styles["title"]).drawOn(
+        c, title_x, height - 1.4 * cm
+    )
+    Paragraph("Intercompany Consulting Brief", styles["subtitle"]).drawOn(
+        c, title_x, height - 2.1 * cm
+    )
+
+    # thin accent line
+    c.setFillColor(ACCENT_BLUE)
+    c.rect(0, height - header_h - 0.15 * cm, width, 0.15 * cm, fill=1, stroke=0)
+
+    # --- COMPANY PROFILE CARD (TOP RIGHT) -----------------------------------
+    card_w = 6 * cm
+    card_h = 3.5 * cm
+    card_x = width - card_w - 1 * cm
+    card_y = height - header_h - card_h + 0.6 * cm
+
     c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(5 * cm, height - 1.4 * cm, "Bivenue Copilot")
+    c.roundRect(card_x, card_y, card_w, card_h, radius=0.3 * cm, fill=1, stroke=1)
 
-    c.setFont("Helvetica", 11)
-    c.drawString(5 * cm, height - 2.2 * cm, f"{domain} Consulting Brief")
-
-    # --- Company info box on right ---
-    box_width = 7 * cm
-    box_height = header_height - 0.8 * cm
-    box_x = width - box_width - 1 * cm
-    box_y = height - header_height + 0.4 * cm
-
-    c.setFillColorRGB(1, 1, 1)
-    c.roundRect(box_x, box_y, box_width, box_height, 0.4 * cm, fill=1, stroke=0)
-
-    c.setFillColorRGB(dark_r, dark_g, dark_b)
+    c.setFillColor(DARK_BLUE)
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(box_x + 0.4 * cm, box_y + box_height - 0.7 * cm, "Company Profile")
+    c.drawString(card_x + 0.5 * cm, card_y + card_h - 0.9 * cm, "Company Profile")
 
     c.setFont("Helvetica", 8)
-    y_ci = box_y + box_height - 1.4 * cm
-    info_lines = [
-        f"Name: {company_name}",
-        f"Industry: {industry}",
+    c.drawString(card_x + 0.5 * cm, card_y + card_h - 1.7 * cm, f"Name: {client_name}")
+    c.drawString(card_x + 0.5 * cm, card_y + card_h - 2.4 * cm, f"Industry: {industry}")
+    c.drawString(card_x + 0.5 * cm, card_y + card_h - 3.1 * cm, f"Domain: {domain}")
+
+    # --- MAIN BODY: 3 COLUMNS -----------------------------------------------
+    top_y = height - header_h - 1.2 * cm
+    bottom_margin = 2.2 * cm
+    available_h = top_y - bottom_margin
+
+    col_gap = 0.7 * cm
+    col_w = (width - 2 * cm - 2 * col_gap) / 3.0
+
+    frame1 = Frame(
+        1 * cm,
+        bottom_margin,
+        col_w,
+        available_h,
+        showBoundary=0,
+    )
+    frame2 = Frame(
+        1 * cm + col_w + col_gap,
+        bottom_margin,
+        col_w,
+        available_h,
+        showBoundary=0,
+    )
+    frame3 = Frame(
+        1 * cm + 2 * (col_w + col_gap),
+        bottom_margin,
+        col_w,
+        available_h,
+        showBoundary=0,
+    )
+
+    # Left column — Mission-critical priority
+    mission_story = [
+        Paragraph("Mission-critical priority", styles["h4"]),
+        Paragraph(challenge.replace("\n", "<br/>"), styles["body"]),
     ]
-    if revenue:
-        info_lines.append(f"Revenue: {revenue}")
-    if employees:
-        info_lines.append(f"Employees: {employees}")
 
-    for line in info_lines:
-        c.drawString(box_x + 0.4 * cm, y_ci, line)
-        y_ci -= 0.45 * cm
+    # Middle column — How Bivenue helped
+    how_story = [
+        Paragraph("How Bivenue helped", styles["h4"]),
+        Paragraph(rule_summary.replace("\n", "<br/>"), styles["body"]),
+    ]
 
-    # --- Main content area ---
-    margin = 1.5 * cm
-    content_top = height - header_height - 1.5 * cm
-    content_bottom = 1.8 * cm
+    # Right column — Outcome (AI brief)
+    outcome_story = [
+        Paragraph("Outcome", styles["h4"]),
+        Paragraph(ai_brief.replace("\n", "<br/>"), styles["body"]),
+    ]
 
-    # Define three columns / boxes
-    total_width = width - 2 * margin
-    col_width = (total_width - 2 * 0.8 * cm) / 3  # 0.8cm gap between columns
+    frame1.addFromList(mission_story, c)
+    frame2.addFromList(how_story, c)
+    frame3.addFromList(outcome_story, c)
 
-    # Shared style
-    box_height_main = content_top - content_bottom
-
-    def draw_box(x, title, body):
-        """Draw a white box with title and body text."""
-        c.setFillColorRGB(1, 1, 1)
-        c.roundRect(x, content_bottom, col_width, box_height_main, 0.4 * cm, fill=1, stroke=0)
-
-        # small accent line under title
-        inner_margin_x = x + 0.5 * cm
-        inner_top_y = content_top - 0.6 * cm
-
-        c.setFillColorRGB(dark_r, dark_g, dark_b)
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(inner_margin_x, inner_top_y, title)
-
-        c.setFillColorRGB(accent_r, accent_g, accent_b)
-        c.rect(inner_margin_x, inner_top_y - 0.3 * cm, col_width - 1 * cm, 0.08 * cm, fill=1, stroke=0)
-
-        # body text
-        c.setFillColor(colors.black)
-        body_y_start = inner_top_y - 0.8 * cm
-        _draw_wrapped_text(
-            c,
-            body.strip(),
-            inner_margin_x,
-            body_y_start,
-            max_width=col_width - 1 * cm,
-            font_name="Helvetica",
-            font_size=8.5,
-            leading=11,
-        )
-
-    # Prepare texts for each box
-    mission_text = (
-        "Mission-critical priority:\n\n"
-        f"{challenge.strip()}"
+    # --- FOOTER --------------------------------------------------------------
+    footer_text = (
+        "This brief was generated by Bivenue Copilot – AI-assisted Finance "
+        "Transformation Advisor."
     )
-
-    how_text = (
-        "How Bivenue helped:\n\n"
-        f"{rule_based_summary.strip()}"
-    )
-
-    outcome_text = (
-        "Outcome & AI deep-dive insights:\n\n"
-        f"{ai_brief.strip()}"
-    )
-
-    # Draw the three boxes
-    x1 = margin
-    x2 = margin + col_width + 0.8 * cm
-    x3 = margin + 2 * (col_width + 0.8 * cm)
-
-    draw_box(x1, "Mission-critical priority", mission_text)
-    draw_box(x2, "How Bivenue helped", how_text)
-    draw_box(x3, "Outcome", outcome_text)
-
-    # --- Footer ---
-    c.setFillColorRGB(dark_r, dark_g, dark_b)
-    c.setFont("Helvetica-Oblique", 7)
-    footer_text = "This brief was generated by Bivenue Copilot – AI-assisted Finance Transformation Advisor."
-    c.drawString(margin, 0.9 * cm, footer_text)
+    Paragraph(footer_text, styles["footer"]).wrapOn(c, width - 2 * cm, 30)
+    Paragraph(footer_text, styles["footer"]).drawOn(c, 1 * cm, 1.1 * cm)
 
     c.showPage()
     c.save()
-    buf.seek(0)
-    return buf
+
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes
