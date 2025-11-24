@@ -103,19 +103,9 @@ def render_result(domain: str, recommendations: str, challenge: str) -> None:
     )
 
 
-def render_ai_section(
-    challenge: str,
-    domain: str,
-    recommendations: str,
-) -> None:
+def render_ai_section(challenge: str, domain: str, recommendations: str) -> None:
     st.divider()
     st.subheader("3) AI deep-dive analysis (experimental)")
-
-    # Extra safety: revalidate before calling the LLM
-    error_message = validate_challenge_input(challenge.strip())
-    if error_message:
-        st.warning(error_message)
-        return
 
     ai_brief: Optional[str] = None
     ai_error: Optional[str] = None
@@ -132,18 +122,12 @@ def render_ai_section(
     except Exception as e:
         ai_error = f"AI error: {e}"
 
+    # Display final result once
     if ai_brief:
         st.markdown(ai_brief)
     elif ai_error:
         st.warning(ai_error)
 
-
-
-
-    if ai_brief:
-        st.markdown(ai_brief)
-    elif ai_error:
-        st.warning(ai_error)
 
 
 def main() -> None:
