@@ -68,11 +68,15 @@ def render_ai_section(
             )
     except LLMNotConfigured as e:
         ai_error = str(e)
-      except LLMNotConfigured as e:
-        ai_error = str(e)
     except Exception as e:
         # Show the real error message so we can debug
         ai_error = f"AI error: {e}"
+
+    if ai_brief:
+        st.markdown(ai_brief)
+    elif ai_error:
+        st.warning(ai_error)
+
 
 
     if ai_brief:
