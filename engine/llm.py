@@ -1,6 +1,4 @@
 import os
-from typing import Optional
-
 from openai import OpenAI
 
 
@@ -18,24 +16,13 @@ def _get_client() -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
-def _extract_text(response) -> str:
-    """
-    Helper for the Responses API: pull plain text from the output structure.
-    """
-    # New Responses API: response.output[0].content[0].text.value
-    try:
-        return response.output[0].content[0].text.value.strip()
-    except Exception:
-        return "AI response could not be parsed."
-
-
 def generate_ai_analysis(
     problem: str,
     domain: str,
     rule_based_summary: str,
 ) -> str:
     """
-    Call OpenAI Responses API to generate a consultant-style deep-dive analysis.
+    Call OpenAI Chat Completions API to generate a consultant-style deep-dive analysis.
     Returns markdown text.
     """
     client = _get_client()
@@ -69,13 +56,13 @@ Please provide:
 Keep it concise, practical, and non-technical. Use markdown formatting.
 """
 
-    response = client.responses.create(
+    response = client.chat.completions.create(
         model="gpt-4.1-mini",
-        input=[
+        temperature=0.3,
+        messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        max_output_tokens=800,
     )
 
-    return _extract_text(response)
+    return response.choices[0].message.content.strip()
