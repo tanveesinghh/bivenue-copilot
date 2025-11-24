@@ -22,47 +22,63 @@ def generate_ai_analysis(
     rule_based_summary: str,
 ) -> str:
     """
-    Call OpenAI Chat Completions API to generate a consultant-style deep-dive analysis.
-    Returns markdown text.
+    Ask the LLM for a structured, consulting-style deep dive.
     """
+
     client = _get_client()
 
-    system_prompt = (
-        "You are a senior Finance Transformation director. "
-        "You specialise in R2R, Intercompany, Consolidation, P2P, O2C and FP&A. "
-        "You take an existing rule-based diagnosis and turn it into a clear, "
-        "executive-ready analysis with bullet points and short paragraphs."
+    system_msg = (
+        "You are a senior Finance Transformation consultant (Big 4 / MBB style). "
+        "Your client is a CFO or Global Process Owner. "
+        "You specialise in R2R, P2P, O2C, Intercompany, Consolidation and FP&A. "
+        "Respond in concise, well-structured markdown. No fluff."
     )
 
-    user_prompt = f"""
-Problem statement from the client:
+    user_msg = f"""
+You are advising a client on a **{domain}** problem.
 
+The user described their challenge as:
 \"\"\"{problem}\"\"\"
 
-
-Detected finance domain: {domain}
-
-Rule-based recommendations from the engine:
-
+A simple rule-based engine has already produced this summary:
 \"\"\"{rule_based_summary}\"\"\"
 
+Using this as a starting point, produce a **short consulting brief** with the following sections:
 
-Please provide:
+1. **Context & Problem Restatement**  
+   - Rephrase the situation in 2–4 sentences, in CFO language.
 
-1. A 2–3 line executive summary.
-2. 3–5 key root causes, grouped by Process / Technology / Organisation / Data / Policy.
-3. A short, prioritised action plan (Quick wins → 3–6 months → 6–12 months).
+2. **Likely Root Causes**  
+   - 3–6 bullet points focusing on process, technology, data and organisation.
 
-Keep it concise, practical, and non-technical. Use markdown formatting.
+3. **Quick Wins (0–3 months)**  
+   - 3–5 concrete actions that can be started immediately.  
+   - Emphasise low-cost, high-impact changes.
+
+4. **Roadmap 3–6 months**  
+   - Key workstreams and milestones (process, tech, org, data).
+
+5. **Roadmap 6–12 months**  
+   - Higher maturity items (automation, target operating model, analytics, etc.).
+
+6. **Risks & Dependencies**  
+   - 3–5 bullets of things that could block success (e.g. change resistance, data quality, IT capacity).
+
+7. **Success Metrics / KPIs**  
+   - 5–8 KPIs a CFO should track (cycle time, IC breaks, close quality, etc.).
+
+Write in **clear bullet points**, no more than ~600–700 words total.
+Do not invent system names or vendors unless obviously generic (e.g. “ERP”, “consolidation tool”).
 """
 
     response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0.3,
+        model="gpt-4o-mini",  # or whatever model you're using
         messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg},
         ],
+        temperature=0.3,
+        max_tokens=900,
     )
 
     return response.choices[0].message.content.strip()
