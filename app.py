@@ -2,6 +2,8 @@ import streamlit as st
 
 from engine.classifier import classify_domain
 from engine.generator import generate_recommendations
+from engine.llm import generate_ai_analysis, LLMNotConfigured
+
 
 
 st.set_page_config(page_title="Bivenue Copilot", layout="wide")
@@ -42,6 +44,7 @@ def render_result(domain: str, recommendations: str, challenge: str):
 
 
 def main():
+def main():
     render_header()
     challenge = render_input()
 
@@ -50,11 +53,35 @@ def main():
             st.warning("Please describe your challenge first.")
             return
 
-        with st.spinner("Analyzing your challenge..."):
+        with st.spinner("Running rule-based diagnostic..."):
             domain = classify_domain(challenge)
             recommendations = generate_recommendations(domain, challenge)
 
         render_result(domain, recommendations, challenge)
+
+        # --- AI Deep Dive section ---
+        st.divider()
+        st.subheader("3) AI deep-dive analysis (experimental)")
+
+        ai_brief = None
+        ai_error: Optional[str] = None
+
+        try:
+            with st.spinner("Asking the AI copilot for a deeper analysis..."):
+                ai_brief = generate_ai_analysis(
+                    problem=challenge,
+                    domain=domain,
+                    rule_based_summary=recommendations,
+                )
+        except LLMNotConfigured as e:
+            ai_error = str(e)
+        except Exception:
+            ai_error = "AI generation failed. Please try again later."
+
+        if ai_brief:
+            st.markdown(ai_brief)
+        elif ai_error:
+            st.warning(ai_error)
 
 
 if __name__ == "__main__":
