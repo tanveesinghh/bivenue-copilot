@@ -105,7 +105,11 @@ def render_result(domain: str, recommendations: str, challenge: str) -> None:
     )
 
 
-def render_ai_section(challenge: str, domain: str, recommendations: str) -> None:
+def render_ai_section(
+    challenge: str,
+    domain: str,
+    recommendations: str,
+) -> None:
     st.divider()
     st.subheader("3) AI deep-dive analysis (experimental)")
 
@@ -123,6 +127,33 @@ def render_ai_section(challenge: str, domain: str, recommendations: str) -> None
         ai_error = str(e)
     except Exception as e:
         ai_error = f"AI error: {e}"
+
+    if ai_brief:
+        st.markdown(ai_brief)
+
+        # --- Build branded PDF and expose download button ---
+        pdf_bytes = create_consulting_brief_pdf(
+            logo_path="assets/bivenue_logo.png",  # adjust if your path is different
+            domain=domain,
+            challenge=challenge,
+            rule_based_summary=recommendations,
+            ai_brief=ai_brief,
+            company_name="Butterfield-style Client",  # you can expose inputs later
+            industry="Finance",
+            revenue=None,
+            employees=None,
+        )
+
+        st.download_button(
+            label="📥 Download 1-page consulting brief (PDF)",
+            data=pdf_bytes,
+            file_name="bivenue_finance_brief.pdf",
+            mime="application/pdf",
+        )
+
+    elif ai_error:
+        st.warning(ai_error)
+
 
     # Display final result once
     if ai_brief:
