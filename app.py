@@ -83,5 +83,6 @@ def main():
         elif ai_error:
             st.warning(ai_error)
 
-
+if __name__ == "__main__":
+    main()
 
