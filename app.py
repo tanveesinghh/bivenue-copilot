@@ -68,8 +68,12 @@ def render_ai_section(
             )
     except LLMNotConfigured as e:
         ai_error = str(e)
-    except Exception:
-        ai_error = "AI generation failed. Please try again later."
+      except LLMNotConfigured as e:
+        ai_error = str(e)
+    except Exception as e:
+        # Show the real error message so we can debug
+        ai_error = f"AI error: {e}"
+
 
     if ai_brief:
         st.markdown(ai_brief)
