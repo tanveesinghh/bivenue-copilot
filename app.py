@@ -111,6 +111,12 @@ def render_ai_section(
     st.divider()
     st.subheader("3) AI deep-dive analysis (experimental)")
 
+    # Extra safety: revalidate before calling the LLM
+    error_message = validate_challenge_input(challenge.strip())
+    if error_message:
+        st.warning(error_message)
+        return
+
     ai_brief: Optional[str] = None
     ai_error: Optional[str] = None
 
@@ -124,13 +130,13 @@ def render_ai_section(
     except LLMNotConfigured as e:
         ai_error = str(e)
     except Exception as e:
-        # Show the real error message so we can debug
         ai_error = f"AI error: {e}"
 
     if ai_brief:
         st.markdown(ai_brief)
     elif ai_error:
         st.warning(ai_error)
+
 
 
 
@@ -145,16 +151,20 @@ def main() -> None:
     challenge = render_input()
 
     if st.button("Diagnose", type="primary"):
-        if not challenge.strip():
-            st.warning("Please describe your challenge first.")
+        # 1) Run our content filter first
+        error_message = validate_challenge_input(challenge.strip())
+        if error_message:
+            st.warning(error_message)
             return
 
+        # 2) If safe, continue with rule-based engine
         with st.spinner("Running rule-based diagnostic..."):
             domain = classify_domain(challenge)
             recommendations = generate_recommendations(domain, challenge)
 
         render_result(domain, recommendations, challenge)
         render_ai_section(challenge, domain, recommendations)
+
 
 
 if __name__ == "__main__":
