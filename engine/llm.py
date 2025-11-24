@@ -13,9 +13,20 @@ def _get_client() -> OpenAI:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise LLMNotConfigured(
-            "OPENAI_API_KEY not set. Configure it in Streamlit Cloud → Settings → Secrets."
+            "AI is not configured yet. Set OPENAI_API_KEY in Streamlit → Settings → Secrets."
         )
     return OpenAI(api_key=api_key)
+
+
+def _extract_text(response) -> str:
+    """
+    Helper for the Responses API: pull plain text from the output structure.
+    """
+    # New Responses API: response.output[0].content[0].text.value
+    try:
+        return response.output[0].content[0].text.value.strip()
+    except Exception:
+        return "AI response could not be parsed."
 
 
 def generate_ai_analysis(
@@ -24,17 +35,16 @@ def generate_ai_analysis(
     rule_based_summary: str,
 ) -> str:
     """
-    Call OpenAI to generate a consultant-style deep-dive analysis.
-
-    Returns a markdown string.
+    Call OpenAI Responses API to generate a consultant-style deep-dive analysis.
+    Returns markdown text.
     """
     client = _get_client()
 
     system_prompt = (
         "You are a senior Finance Transformation director. "
         "You specialise in R2R, Intercompany, Consolidation, P2P, O2C and FP&A. "
-        "Your job is to take an existing rule-based diagnosis and turn it into a "
-        "clear, executive-ready analysis with bullet points and short paragraphs."
+        "You take an existing rule-based diagnosis and turn it into a clear, "
+        "executive-ready analysis with bullet points and short paragraphs."
     )
 
     user_prompt = f"""
@@ -59,13 +69,13 @@ Please provide:
 Keep it concise, practical, and non-technical. Use markdown formatting.
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",  # cheap + smart
-        temperature=0.3,
-        messages=[
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        input=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
+        max_output_tokens=800,
     )
 
-    return response.choices[0].message.content.strip()
+    return _extract_text(response)
