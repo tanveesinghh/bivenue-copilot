@@ -9,6 +9,61 @@ from engine.llm import generate_ai_analysis, LLMNotConfigured
 
 st.set_page_config(page_title="Bivenue Copilot", layout="wide")
 
+# -------- Content Filter / Input Guardrail -------- #
+
+FORBIDDEN_KEYWORDS = [
+    "porn", "porno", "nude", "nudity", "sex", "sexual", "xxx",
+    "escort", "fetish", "adult video", "onlyfans",
+    "terrorist", "terrorism", "bomb", "explosive",
+    "drugs", "cocaine", "heroin", "meth",
+    "kill", "murder", "shoot", "rape",
+    "hack", "hacking", "ddos", "malware",
+]
+
+NON_FINANCE_TOPICS = [
+    "dating", "relationship", "romantic", "tinder", "hinge",
+    "gaming", "video game", "minecraft", "pubg", "valorant",
+    "movie", "film", "anime", "manga",
+]
+
+
+def validate_challenge_input(text: str) -> str | None:
+    """
+    Returns an error message string if the input is not allowed,
+    otherwise returns None (meaning it's safe to process).
+    """
+    if not text:
+        return "Please describe your finance transformation challenge first."
+
+    lowered = text.lower()
+
+    # Block obviously disallowed / NSFW / illegal content
+    for word in FORBIDDEN_KEYWORDS:
+        if word in lowered:
+            return (
+                "This copilot is restricted to **finance / business transformation** "
+                "use cases only. Content with sexual, violent, criminal or harmful "
+                "intent is not allowed."
+            )
+
+    # Gently push away non-finance topics
+    for word in NON_FINANCE_TOPICS:
+        if word in lowered:
+            return (
+                "It looks like your question is not about **finance transformation**. "
+                "Please describe a challenge related to R2R, P2P, O2C, FP&A, "
+                "intercompany, consolidation, close, or process/tech/people change."
+            )
+
+    # Optional: very long input guard
+    if len(text) > 4000:
+        return (
+            "Your description is a bit too long. Please summarise the challenge "
+            "in under 4,000 characters."
+        )
+
+    return None
+
 
 def render_header() -> None:
     st.title("🧠 Bivenue Copilot")
