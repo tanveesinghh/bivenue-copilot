@@ -1,4 +1,5 @@
 from typing import Optional
+
 import streamlit as st
 
 from engine.classifier import classify_domain
@@ -7,15 +8,10 @@ from engine.llm import generate_ai_analysis, LLMNotConfigured
 from engine.pdf_export import create_consulting_brief_pdf
 
 
-# -------------------------------------------------------
-# Streamlit Page Configuration
-# -------------------------------------------------------
 st.set_page_config(page_title="Bivenue Copilot", layout="wide")
 
+# -------- Content Filter / Input Guardrail -------- #
 
-# -------------------------------------------------------
-# Content Filter / Safety Guardrails
-# -------------------------------------------------------
 FORBIDDEN_KEYWORDS = [
     "porn", "porno", "nude", "nudity", "sex", "sexual", "xxx",
     "escort", "fetish", "adult video", "onlyfans",
@@ -33,36 +29,43 @@ NON_FINANCE_TOPICS = [
 
 
 def validate_challenge_input(text: str) -> str | None:
-    """Returns an error message if content is not allowed."""
+    """
+    Returns an error message string if the input is not allowed,
+    otherwise returns None (meaning it's safe to process).
+    """
     if not text:
         return "Please describe your finance transformation challenge first."
 
     lowered = text.lower()
 
+    # Block obviously disallowed / NSFW / illegal content
     for word in FORBIDDEN_KEYWORDS:
         if word in lowered:
             return (
-                "This copilot supports **finance/business transformation** only. "
-                "Sexual, violent, illegal or harmful topics are blocked."
+                "This copilot is restricted to **finance / business transformation** "
+                "use cases only. Content with sexual, violent, criminal or harmful "
+                "intent is not allowed."
             )
 
+    # Gently push away non-finance topics
     for word in NON_FINANCE_TOPICS:
         if word in lowered:
             return (
-                "It looks like your question is not related to **finance transformation**. "
-                "Please describe R2R, P2P, O2C, FP&A, intercompany, consolidation, "
-                "close, or process/tech/people challenges."
+                "It looks like your question is not about **finance transformation**. "
+                "Please describe a challenge related to R2R, P2P, O2C, FP&A, "
+                "intercompany, consolidation, close, or process/tech/people change."
             )
 
+    # Optional: very long input guard
     if len(text) > 4000:
-        return "Please summarise your challenge in under 4,000 characters."
+        return (
+            "Your description is a bit too long. Please summarise the challenge "
+            "in under 4,000 characters."
+        )
 
     return None
 
 
-# -------------------------------------------------------
-# UI Rendering
-# -------------------------------------------------------
 def render_header() -> None:
     st.title("🧠 Bivenue Copilot")
     st.caption("Your AI Advisor for Finance Transformation.")
@@ -70,48 +73,50 @@ def render_header() -> None:
 
 def render_input() -> str:
     st.subheader("Describe your finance transformation challenge")
-    return st.text_area(
+    challenge = st.text_area(
         label="Describe your finance transformation challenge",
         placeholder=(
-            "e.g., 'Intercompany mismatches causing consolidation delays across "
-            "entities using SAP and BlackLine; manual Excel reconciliations; "
-            "unclear ownership between GBS and controllers.'"
+            "e.g., 'Intercompany mismatches causing consolidation delays across entities "
+            "using SAP and BlackLine; lots of manual Excel reconciliations; unclear "
+            "ownership between GBS and local controllers.'"
         ),
         height=160,
         label_visibility="collapsed",
     )
+    return challenge
 
 
 def render_result(domain: str, recommendations: str, challenge: str) -> None:
     st.success("Rule-based diagnostic complete.")
 
-    st.subheader("1) Detected Finance Domain")
+    st.subheader("1) Detected finance domain")
     st.write(f"**Domain:** {domain}")
 
     with st.expander("See original problem statement"):
         st.write(challenge)
 
-    st.subheader("2) Recommended Focus Areas & Actions")
+    st.subheader("2) Recommended focus areas & actions")
     st.markdown(recommendations)
 
     st.info(
-        "This is a rule-based V1 engine. Future versions will use your playbooks, "
-        "historical data, and LLMs to refine the diagnosis."
+        "This is a rule-based v1 engine. Future versions will use your playbooks, "
+        "historical data, and LLMs to refine the diagnosis and roadmap."
     )
 
 
-# -------------------------------------------------------
-# AI Deep-Dive Section
-# -------------------------------------------------------
-def render_ai_section(challenge: str, domain: str, recommendations: str) -> None:
+def render_ai_section(
+    challenge: str,
+    domain: str,
+    recommendations: str,
+) -> None:
     st.divider()
-    st.subheader("3) AI Deep-Dive Analysis (experimental)")
+    st.subheader("3) AI deep-dive analysis (experimental)")
 
     ai_brief: Optional[str] = None
     ai_error: Optional[str] = None
 
     try:
-        with st.spinner("Asking the AI copilot for a deeper analysis…"):
+        with st.spinner("Asking the AI copilot for a deeper analysis..."):
             ai_brief = generate_ai_analysis(
                 problem=challenge,
                 domain=domain,
@@ -122,25 +127,25 @@ def render_ai_section(challenge: str, domain: str, recommendations: str) -> None
     except Exception as e:
         ai_error = f"AI error: {e}"
 
-    # --- Display AI result ---
     if ai_brief:
+        # Show the AI analysis on screen
         st.markdown(ai_brief)
 
-        # --- PDF Generation ---
+        # --- Build branded PDF and expose download button ---
         pdf_bytes = create_consulting_brief_pdf(
-            logo_path="engine/bivenue_logo.png",  # correct path
+            logo_path="engine/bivenue_logo.png",  # <- updated path
             domain=domain,
             challenge=challenge,
             rule_based_summary=recommendations,
             ai_brief=ai_brief,
-            company_name="Butterfield-style Client",
+            company_name="Butterfield-style Client",  # can be made dynamic later
             industry="Finance",
             revenue=None,
             employees=None,
         )
 
         st.download_button(
-            label="📥 Download 1-page Consulting Brief (PDF)",
+            label="📥 Download 1-page consulting brief (PDF)",
             data=pdf_bytes,
             file_name="bivenue_finance_brief.pdf",
             mime="application/pdf",
@@ -150,29 +155,23 @@ def render_ai_section(challenge: str, domain: str, recommendations: str) -> None
         st.warning(ai_error)
 
 
-# -------------------------------------------------------
-# Main App
-# -------------------------------------------------------
 def main() -> None:
     render_header()
     challenge = render_input()
 
     if st.button("Diagnose", type="primary"):
-        # 1. Validate content
+        # 1) Run our content filter first
         error_message = validate_challenge_input(challenge.strip())
         if error_message:
             st.warning(error_message)
             return
 
-        # 2. Run rule-based engine
-        with st.spinner("Running rule-based diagnostic…"):
+        # 2) If safe, continue with rule-based engine
+        with st.spinner("Running rule-based diagnostic..."):
             domain = classify_domain(challenge)
             recommendations = generate_recommendations(domain, challenge)
 
-        # 3. Show results
         render_result(domain, recommendations, challenge)
-
-        # 4. AI expansion
         render_ai_section(challenge, domain, recommendations)
 
 
