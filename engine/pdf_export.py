@@ -94,25 +94,26 @@ def _draw_top_banner(
     No 'Bivenue Copilot' text.
     """
     banner_color = "#003966"
-    draw.rectangle([(0, 0), (PAGE_WIDTH, BANNER_HEIGHT)], fill=banner_color)
+   # ----- HEADER (Logo Only) -----
+HEADER_BG = "#003A70"   # dark blue background (same as before)
 
-    # --- Left: Logo only ---
-    if logo_path:
-        try:
-            logo = Image.open(logo_path).convert("RGBA")
-            # Fit logo into a fixed box
-            target_h = 120
-            ratio = target_h / logo.height
-            target_w = int(logo.width * ratio)
-            logo = logo.resize((target_w, target_h), Image.LANCZOS)
+# Draw the header background bar
+draw.rectangle([0, 0, width, HEADER_HEIGHT], fill=HEADER_BG)
 
-            logo_x = MARGIN
-            logo_y = BANNER_HEIGHT // 2 - target_h // 2
-            img.paste(logo, (logo_x, logo_y), logo)
-        except Exception:
-            # Silent fail if logo can't be loaded
-            pass
+# Insert the logo on the right side
+if logo:
+    # scale logo to fit inside header
+    max_logo_height = 80
+    scale = max_logo_height / logo.size[1]
+    new_width = int(logo.size[0] * scale)
+    new_height = int(logo.size[1] * scale)
+    resized_logo = logo.resize((new_width, new_height))
 
+    # position logo on the right side with padding
+    logo_x = width - new_width - 40
+    logo_y = (HEADER_HEIGHT - new_height) // 2
+
+    img.paste(resized_logo, (logo_x, logo_y), resized_logo)
     # --- Right: Company profile card ---
     card_width = 520
     card_height = 200
