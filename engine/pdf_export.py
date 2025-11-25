@@ -1,227 +1,254 @@
+# engine/pdf_export.py
+
 from io import BytesIO
-from textwrap import wrap
+from typing import Optional
 
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.units import mm
-from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
+from PIL import Image, ImageDraw, ImageFont
 
 
-BRAND_BLUE = colors.HexColor("#003B73")   # dark blue
-ACCENT_BLUE = colors.HexColor("#00B7FF")  # lighter accent
+# Try to load fonts that look a bit more “consulting deck” style.
+# If these fail on Streamlit Cloud, Pillow will fall back to a default font.
+def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    try:
+        if bold:
+            return ImageFont.truetype("arialbd.ttf", size)
+        return ImageFont.truetype("arial.ttf", size)
+    except Exception:
+        return ImageFont.load_default()
 
 
-def _draw_wrapped_text(c, text, x, y, max_width, leading=12, font_name="Helvetica", font_size=9):
+def _wrap_text(text: str, font: ImageFont.ImageFont, max_width: int, draw: ImageDraw.ImageDraw) -> list[str]:
+    """Simple word-wrap helper."""
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+
+    for w in words:
+        test = (current + " " + w).strip()
+        w_width, _ = draw.textsize(test, font=font)
+        if w_width <= max_width or not current:
+            current = test
+        else:
+            lines.append(current)
+            current = w
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _draw_paragraph(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    x: int,
+    y: int,
+    width: int,
+    font: ImageFont.ImageFont,
+    fill: str = "black",
+    line_spacing: int = 4,
+) -> int:
     """
-    Helper to draw wrapped text and return the new y position.
+    Draws a multi-line paragraph and returns the new y position
+    (just after the last line).
     """
-    c.setFont(font_name, font_size)
-    if not text:
-        return y
-
-    # naive wrapping (works fine for our short briefs)
-    words = text.replace("\r", " ").split("\n")
-    lines = []
-    for block in words:
-        lines.extend(wrap(block, 120))  # adjust if needed
-
-    for line in lines:
-        c.drawString(x, y, line)
-        y -= leading
+    for line in _wrap_text(text, font, width, draw):
+        draw.text((x, y), line, font=font, fill=fill)
+        _, h = draw.textsize(line, font=font)
+        y += h + line_spacing
     return y
 
 
 def create_consulting_brief_pdf(
-    logo_path: str,
+    logo_path: Optional[str],
     domain: str,
     challenge: str,
     rule_based_summary: str,
     ai_brief: str,
-    company_name: str = "Client",
-    industry: str | None = None,
-    revenue: str | None = None,
-    employees: str | None = None,
+    company_name: str,
+    industry: str,
+    revenue: Optional[str] = None,
+    employees: Optional[str] = None,
 ) -> bytes:
     """
-    Build a 1-page consulting brief PDF and return the bytes.
-    Layout is inspired by Gartner-style one-pagers.
+    Generate a 1-page branded PDF in a Gartner-style layout.
+
+    - Dark-blue header band
+    - Logo + title on the left
+    - Company profile card on the right
+    - Three columns: Mission, How Bivenue helped, Outcome (AI brief)
     """
 
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
+    # --- Page setup (A4-ish, landscape) ---
+    width, height = 1754, 1240  # ~A4 landscape
+    bg_color = "white"
+    header_height = 170
+    brand_blue = "#003B73"  # dark blue
+    accent_blue = "#00B4FF"
 
-    # -------------------------------------------------------
-    # 1. Header band with logo + title
-    # -------------------------------------------------------
-    header_height = 40 * mm
-    c.setFillColor(BRAND_BLUE)
-    c.rect(0, height - header_height, width, header_height, fill=1, stroke=0)
+    image = Image.new("RGB", (width, height), color=bg_color)
+    draw = ImageDraw.Draw(image)
 
-    # Bivenue Copilot title
-    c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(25 * mm, height - 20 * mm, "Bivenue Copilot")
+    # --- Fonts ---
+    title_font = _load_font(40, bold=True)
+    subtitle_font = _load_font(22)
+    section_title_font = _load_font(24, bold=True)
+    body_font = _load_font(18)
+    small_font = _load_font(14)
 
-    c.setFont("Helvetica", 10)
-    c.drawString(25 * mm, height - 26 * mm, "Intercompany Consulting Brief")
+    # --- Header band ---
+    draw.rectangle([(0, 0), (width, header_height)], fill=brand_blue)
 
-    # Logo on right (if file exists)
-    try:
-        logo = ImageReader(logo_path)
-        logo_w = 25 * mm
-        logo_h = 25 * mm
-        c.drawImage(
-            logo,
-            width - logo_w - 15 * mm,
-            height - logo_h - 12 * mm,
-            width=logo_w,
-            height=logo_h,
-            mask="auto",
-        )
-    except Exception:
-        # if logo fails, just ignore — don't break PDF
-        pass
+    # --- Logo on left side of header ---
+    x_logo = 40
+    y_logo = 25
+    logo_max_h = 90
+    logo_max_w = 260
 
-    # Thin accent line below header
-    c.setFillColor(ACCENT_BLUE)
-    c.rect(0, height - header_height - 2 * mm, width, 1.2 * mm, fill=1, stroke=0)
+    if logo_path:
+        try:
+            logo = Image.open(logo_path).convert("RGBA")
+            # scale down to fit box
+            lw, lh = logo.size
+            scale = min(logo_max_w / lw, logo_max_h / lh, 1.0)
+            new_size = (int(lw * scale), int(lh * scale))
+            logo = logo.resize(new_size, Image.LANCZOS)
+            image.paste(logo, (x_logo, y_logo), logo)
+        except Exception:
+            # If logo fails to load we just skip it
+            pass
 
-    # -------------------------------------------------------
-    # 2. Company profile box (top-right)
-    # -------------------------------------------------------
-    right_col_x = width * 0.60
-    box_y_top = height - header_height - 8 * mm
-    box_width = width * 0.35
-    box_height = 35 * mm
-
-    c.setFillColor(colors.whitesmoke)
-    c.roundRect(
-        right_col_x,
-        box_y_top - box_height,
-        box_width,
-        box_height,
-        4 * mm,
-        fill=1,
-        stroke=0,
+    # --- Title + subtitle in header ---
+    title_x = x_logo + logo_max_w + 30
+    title_y = 45
+    draw.text((title_x, title_y), "Bivenue Copilot", font=title_font, fill="white")
+    subtitle_y = title_y + 50
+    draw.text(
+        (title_x, subtitle_y),
+        f"{domain} Consulting Brief",
+        font=subtitle_font,
+        fill="white",
     )
 
-    c.setFillColor(BRAND_BLUE)
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(right_col_x + 5 * mm, box_y_top - 7 * mm, "Company Profile")
+    # --- Company profile card (right in header) ---
+    card_width = 380
+    card_height = header_height - 40
+    card_x = width - card_width - 30
+    card_y = 20
 
-    c.setFont("Helvetica", 8)
-    y = box_y_top - 13 * mm
-    c.setFillColor(colors.black)
-    c.drawString(right_col_x + 5 * mm, y, f"Name: {company_name}")
-    y -= 5 * mm
-    if industry:
-        c.drawString(right_col_x + 5 * mm, y, f"Industry: {industry}")
-        y -= 5 * mm
+    draw.rounded_rectangle(
+        [(card_x, card_y), (card_x + card_width, card_y + card_height)],
+        radius=16,
+        fill="white",
+    )
+
+    cp_title_y = card_y + 16
+    draw.text((card_x + 20, cp_title_y), "Company Profile", font=section_title_font, fill=brand_blue)
+
+    info_y = cp_title_y + 40
+    info_y = _draw_paragraph(
+        draw,
+        f"Name: {company_name}",
+        card_x + 20,
+        info_y,
+        card_width - 40,
+        body_font,
+        fill="black",
+    )
+    info_y = _draw_paragraph(
+        draw,
+        f"Industry: {industry}",
+        card_x + 20,
+        info_y,
+        card_width - 40,
+        body_font,
+        fill="black",
+    )
     if revenue:
-        c.drawString(right_col_x + 5 * mm, y, f"Revenue: {revenue}")
-        y -= 5 * mm
+        info_y = _draw_paragraph(
+            draw,
+            f"Revenue: {revenue}",
+            card_x + 20,
+            info_y,
+            card_width - 40,
+            body_font,
+            fill="black",
+        )
     if employees:
-        c.drawString(right_col_x + 5 * mm, y, f"Employees: {employees}")
-        y -= 5 * mm
+        _ = _draw_paragraph(
+            draw,
+            f"Employees: {employees}",
+            card_x + 20,
+            info_y,
+            card_width - 40,
+            body_font,
+            fill="black",
+        )
 
-    # -------------------------------------------------------
-    # 3. Left column – Mission-critical priority
-    # -------------------------------------------------------
-    margin_x = 20 * mm
-    content_top = height - header_height - 15 * mm
+    # --- Thin accent line under header ---
+    draw.rectangle([(0, header_height), (width, header_height + 6)], fill=accent_blue)
 
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(margin_x, content_top, "Mission-critical priority")
+    # --- Column layout below header ---
+    top = header_height + 30
+    margin_x = 40
+    usable_width = width - 2 * margin_x
+    col_gap = 40
+    col_width = int((usable_width - 2 * col_gap) / 3)
 
-    # Accent underline
-    c.setFillColor(ACCENT_BLUE)
-    c.rect(margin_x, content_top - 3 * mm, 60 * mm, 0.8 * mm, fill=1, stroke=0)
+    col1_x = margin_x
+    col2_x = col1_x + col_width + col_gap
+    col3_x = col2_x + col_width + col_gap
 
-    c.setFillColor(colors.black)
-    y = content_top - 10 * mm
-    c.setFont("Helvetica", 9)
-    c.drawString(margin_x, y, "Mission-critical priority:")
-    y -= 6 * mm
-    c.setFont("Helvetica-Bold", 9)
-    c.drawString(margin_x, y, domain or "Finance Transformation")
-    y -= 10 * mm
+    # --- Column 1: Mission-critical priority ---
+    y1 = top
+    draw.text((col1_x, y1), "Mission-critical priority", font=section_title_font, fill=brand_blue)
+    y1 += 32
+    # accent line
+    draw.line([(col1_x, y1), (col1_x + col_width, y1)], fill=accent_blue, width=4)
+    y1 += 16
 
-    # -------------------------------------------------------
-    # 4. Middle column – How Bivenue helped (rule-based)
-    # -------------------------------------------------------
-    middle_x = width * 0.33
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(middle_x, content_top, "How Bivenue helped")
+    mission_text = f"Mission-critical priority:\n{domain}"
+    y1 = _draw_paragraph(draw, mission_text, col1_x, y1, col_width, body_font)
 
-    c.setFillColor(ACCENT_BLUE)
-    c.rect(middle_x, content_top - 3 * mm, 60 * mm, 0.8 * mm, fill=1, stroke=0)
+    # --- Column 2: How Bivenue helped ---
+    y2 = top
+    draw.text((col2_x, y2), "How Bivenue helped", font=section_title_font, fill=brand_blue)
+    y2 += 32
+    draw.line([(col2_x, y2), (col2_x + col_width, y2)], fill=accent_blue, width=4)
+    y2 += 16
 
-    y_mid = content_top - 10 * mm
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica", 9)
-    y_mid = _draw_wrapped_text(
-        c,
-        rule_based_summary or "",
-        middle_x,
-        y_mid,
-        max_width=width * 0.27,
-        leading=11,
+    # Re-use the rule-based recommendations as bullets
+    how_text = "How Bivenue helped:\n" + rule_based_summary
+    y2 = _draw_paragraph(draw, how_text, col2_x, y2, col_width, body_font)
+
+    # --- Column 3: Outcome (AI brief) ---
+    y3 = top
+    draw.text((col3_x, y3), "Outcome", font=section_title_font, fill=brand_blue)
+    y3 += 32
+    draw.line([(col3_x, y3), (col3_x + col_width, y3)], fill=accent_blue, width=4)
+    y3 += 16
+
+    outcome_intro = "Outcome & AI deep-dive insights:"
+    y3 = _draw_paragraph(draw, outcome_intro, col3_x, y3, col_width, body_font)
+
+    # We don’t want to repeat the title if the AI brief starts with "# Intercompany…"
+    cleaned_ai_brief = ai_brief.strip()
+    if cleaned_ai_brief.startswith("#"):
+        # Drop the first line (the Markdown heading)
+        cleaned_ai_brief = "\n".join(cleaned_ai_brief.splitlines()[1:]).strip()
+
+    y3 = _draw_paragraph(draw, cleaned_ai_brief, col3_x, y3, col_width, small_font)
+
+    # --- Footer note ---
+    footer_text = "This brief was generated by Bivenue Copilot – AI-assisted Finance Transformation Advisor."
+    fw, fh = draw.textsize(footer_text, font=small_font)
+    draw.text(
+        ((width - fw) // 2, height - fh - 20),
+        footer_text,
+        font=small_font,
+        fill=brand_blue,
     )
 
-    # -------------------------------------------------------
-    # 5. Right column – Outcome & AI deep dive
-    # -------------------------------------------------------
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(right_col_x, content_top, "Outcome")
-
-    c.setFillColor(ACCENT_BLUE)
-    c.rect(right_col_x, content_top - 3 * mm, box_width, 0.8 * mm, fill=1, stroke=0)
-
-    y_right = content_top - 10 * mm
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica", 9)
-
-    # Title from AI brief
-    y_right = _draw_wrapped_text(
-        c,
-        "Outcome & AI deep-dive insights:",
-        right_col_x,
-        y_right,
-        max_width=box_width,
-        leading=11,
-        font_name="Helvetica-Bold",
-        font_size=9,
-    )
-    y_right -= 2 * mm
-    y_right = _draw_wrapped_text(
-        c,
-        ai_brief or "",
-        right_col_x,
-        y_right,
-        max_width=box_width,
-        leading=11,
-        font_name="Helvetica",
-        font_size=8,
-    )
-
-    # -------------------------------------------------------
-    # 6. Footer note
-    # -------------------------------------------------------
-    c.setFont("Helvetica-Oblique", 7)
-    c.setFillColor(colors.grey)
-    footer_text = (
-        "This brief was generated by Bivenue Copilot – AI-assisted Finance Transformation Advisor."
-    )
-    c.drawString(margin_x, 12 * mm, footer_text)
-
-    c.showPage()
-    c.save()
-
-    pdf_bytes = buffer.getvalue()
-    buffer.close()
-    return pdf_bytes
+    # --- Export to PDF ---
+    buffer = BytesIO()
+    image.save(buffer, format="PDF")
+    buffer.seek(0)
+    return buffer.getvalue()
