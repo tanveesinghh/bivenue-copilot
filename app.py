@@ -1,16 +1,21 @@
-from engine.pdf_export import create_consulting_brief_pdf
 from typing import Optional
 
 import streamlit as st
+from graphviz import Digraph
 
 from engine.classifier import classify_domain
 from engine.generator import generate_recommendations
 from engine.llm import generate_ai_analysis, LLMNotConfigured
+from engine.pdf_export import create_consulting_brief_pdf
 
+# -------------------------------------------------
+# Streamlit page config
+# -------------------------------------------------
 st.set_page_config(page_title="Bivenue Copilot", layout="wide")
 
-# -------- Content Filter / Input Guardrail -------- #
-
+# -------------------------------------------------
+# Content Filter / Input Guardrail
+# -------------------------------------------------
 FORBIDDEN_KEYWORDS = [
     "porn", "porno", "nude", "nudity", "sex", "sexual", "xxx",
     "escort", "fetish", "adult video", "onlyfans",
@@ -27,13 +32,14 @@ NON_FINANCE_TOPICS = [
 ]
 
 
-def validate_challenge_input(text: str) -> str | None:
+def validate_challenge_input(text: str) -> Optional[str]:
+    """Return an error message if the input is not allowed, else None."""
     if not text:
         return "Please describe your finance transformation challenge first."
 
     lowered = text.lower()
 
-    # Block obviously disallowed / NSFW / illegal content
+    # Hard block NSFW / harmful content
     for word in FORBIDDEN_KEYWORDS:
         if word in lowered:
             return (
@@ -51,7 +57,7 @@ def validate_challenge_input(text: str) -> str | None:
                 "intercompany, consolidation, close, or process/tech/people change."
             )
 
-    # Very long input guard
+    # Overly long description
     if len(text) > 4000:
         return (
             "Your description is a bit too long. Please summarise the challenge "
@@ -61,6 +67,9 @@ def validate_challenge_input(text: str) -> str | None:
     return None
 
 
+# -------------------------------------------------
+# UI helpers
+# -------------------------------------------------
 def render_header() -> None:
     st.title("🧠 Bivenue Copilot")
     st.caption("Your AI Advisor for Finance Transformation.")
@@ -99,6 +108,71 @@ def render_result(domain: str, recommendations: str, challenge: str) -> None:
     )
 
 
+# -------------------------------------------------
+# Flowchart generator (local, no extra AI)
+# -------------------------------------------------
+def build_flowchart(
+    domain: str,
+    challenge: str,
+    recommendations: str,
+    ai_brief: Optional[str] = None,
+) -> Digraph:
+    """
+    Build a Graphviz flowchart that reflects the journey from:
+    Challenge → Domain → Rule-based focus → AI sections → Outcome.
+    """
+    dot = Digraph()
+    dot.attr(rankdir="LR", bgcolor="white")
+    dot.attr(
+        "node",
+        shape="rectangle",
+        style="rounded,filled",
+        fillcolor="#e3f2fd",
+        color="#1565c0",
+        fontname="Helvetica",
+    )
+
+    # Core nodes
+    dot.node("start", "Finance challenge")
+    dot.node("domain", f"Domain:\n{domain}")
+    dot.node("rule", "Rule-based\nfocus areas")
+
+    dot.edge("start", "domain")
+    dot.edge("domain", "rule")
+
+    prev = "rule"
+
+    # If we have an AI brief, try to detect sections and build steps
+    if ai_brief:
+        text = ai_brief.lower()
+
+        stages = [
+            ("context", "Context & Problem"),
+            ("root", "Likely Root Causes"),
+            ("qw", "Quick Wins (0–3 months)"),
+            ("r36", "Roadmap 3–6 months"),
+            ("r612", "Roadmap 6–12 months"),
+            ("risks", "Risks & Dependencies"),
+            ("kpi", "Success Metrics / KPIs"),
+        ]
+
+        # Simple keyword detection
+        for node_id, label in stages:
+            if label.lower().split("&")[0].strip().lower() in text:
+                dot.node(node_id, label)
+                dot.edge(prev, node_id)
+                prev = node_id
+
+    # Final outcome node
+    dot.node("outcome", "Improved finance\noperations & governance")
+    dot.edge(prev, "outcome")
+
+    return dot
+
+
+# -------------------------------------------------
+# AI section (LLM + PDF + Flowchart)
+# -------------------------------------------------
 def render_ai_section(challenge: str, domain: str, recommendations: str) -> None:
     st.divider()
     st.subheader("3) AI deep-dive analysis (experimental)")
@@ -115,20 +189,21 @@ def render_ai_section(challenge: str, domain: str, recommendations: str) -> None
             )
     except LLMNotConfigured as e:
         ai_error = str(e)
-    except Exception as e:
-        ai_error = f"AI error: {e}"
+    except Exception as e:  # catch-all so we can debug in UI
+        ai_error = f"AI analysis failed: {e}"
 
-    # If we got a brief, show it and build the PDF
     if ai_brief:
+        # 3a) Show the AI brief
         st.markdown(ai_brief)
 
+        # 3b) Build a branded 1-pager PDF
         pdf_bytes = create_consulting_brief_pdf(
-            logo_path="engine/bivenue_logo.png",  # adjust if your logo lives elsewhere
+            logo_path="engine/bivenue_logo.png",  # your logo path
             domain=domain,
             challenge=challenge,
             rule_based_summary=recommendations,
             ai_brief=ai_brief,
-            company_name="Client",  # later you can expose as inputs
+            company_name="Client",  # later you can surface inputs
             industry="Finance",
             revenue=None,
             employees=None,
@@ -141,17 +216,24 @@ def render_ai_section(challenge: str, domain: str, recommendations: str) -> None
             mime="application/pdf",
         )
 
-    # If no brief but we have an error, show the error
+        # 3c) Auto-generated flowchart linked to the AI brief
+        st.subheader("4) Visual roadmap (auto-generated flowchart)")
+        flow = build_flowchart(domain, challenge, recommendations, ai_brief)
+        st.graphviz_chart(flow)
+
     elif ai_error:
         st.warning(ai_error)
 
 
+# -------------------------------------------------
+# Main app
+# -------------------------------------------------
 def main() -> None:
     render_header()
     challenge = render_input()
 
     if st.button("Diagnose", type="primary"):
-        # 1) Content filter
+        # 1) Content guardrail
         error_message = validate_challenge_input(challenge.strip())
         if error_message:
             st.warning(error_message)
@@ -163,6 +245,8 @@ def main() -> None:
             recommendations = generate_recommendations(domain, challenge)
 
         render_result(domain, recommendations, challenge)
+
+        # 3) AI & flowchart section
         render_ai_section(challenge, domain, recommendations)
 
 
