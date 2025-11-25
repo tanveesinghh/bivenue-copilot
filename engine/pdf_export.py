@@ -2,312 +2,324 @@
 
 from __future__ import annotations
 
-import io
-from typing import Optional
+from io import BytesIO
+from typing import Optional, List
 
-from PIL import Image, ImageDraw, ImageFont
+import os
 
-# A4 at 300 DPI (approx); you can tweak if needed
-PAGE_WIDTH = 2480
-PAGE_HEIGHT = 3508
-
-HEADER_HEIGHT = 380
-MARGIN_X = 160
-MARGIN_TOP = HEADER_HEIGHT + 140
-COLUMN_GAP = 80
-
-BRAND_BLUE = (7, 56, 99)       # dark blue header
-LIGHT_GRAY = (245, 247, 250)   # subtle background if needed
-TEXT_DARK = (20, 20, 20)
-
-
-# -------------------------------------------------------------------------
-# Helpers
-# -------------------------------------------------------------------------
-
-def _load_font(size: int) -> ImageFont.FreeTypeFont:
-    """
-    Try a few common fonts so it works on Streamlit Cloud and locally.
-    Fall back to the default PIL bitmap font if none are found.
-    """
-    preferred = [
-        "DejaVuSans.ttf",
-        "arial.ttf",
-        "Helvetica.ttf",
-    ]
-    for name in preferred:
-        try:
-            return ImageFont.truetype(name, size)
-        except Exception:
-            continue
-    return ImageFont.load_default()
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    PageBreak,
+    Table,
+    TableStyle,
+    KeepTogether,
+)
 
 
-def _wrap_text(text: str, draw: ImageDraw.ImageDraw, font: ImageFont.FreeTypeFont,
-               max_width: int) -> list[str]:
-    """
-    Simple word-wrap using draw.textlength (works on modern Pillow).
-    Returns a list of lines that fit within max_width.
-    """
-    words = text.split()
-    lines: list[str] = []
-    current = ""
+def _build_styles():
+    styles = getSampleStyleSheet()
 
-    for word in words:
-        test = (current + " " + word).strip()
-        width = draw.textlength(test, font=font)
-        if width <= max_width:
-            current = test
-        else:
-            if current:
-                lines.append(current)
-            current = word
+    # Base styles
+    body = styles["BodyText"]
+    body.fontName = "Helvetica"
+    body.fontSize = 10
+    body.leading = 13
 
-    if current:
-        lines.append(current)
+    styles.add(
+        ParagraphStyle(
+            name="BodySmall",
+            parent=body,
+            fontSize=9,
+            leading=12,
+        )
+    )
 
-    return lines
+    styles.add(
+        ParagraphStyle(
+            name="SectionHeading",
+            parent=styles["Heading2"],
+            fontName="Helvetica-Bold",
+            fontSize=13,
+            leading=16,
+            textColor=colors.HexColor("#003366"),
+            spaceBefore=12,
+            spaceAfter=6,
+        )
+    )
+
+    styles.add(
+        ParagraphStyle(
+            name="MiniHeading",
+            parent=styles["Heading3"],
+            fontName="Helvetica-Bold",
+            fontSize=11,
+            leading=14,
+            textColor=colors.HexColor("#003366"),
+            spaceBefore=4,
+            spaceAfter=4,
+        )
+    )
+
+    return styles
 
 
-def _draw_paragraph(draw: ImageDraw.ImageDraw,
-                    text: str,
-                    font: ImageFont.FreeTypeFont,
-                    x: int,
-                    y: int,
-                    max_width: int,
-                    line_spacing: int = 8) -> int:
-    """
-    Draw a multi-line paragraph and return the new y position after the text.
-    """
-    text = text.replace("\r", " ").strip()
+def _make_first_page_drawer(
+    title: str,
+    company_name: Optional[str],
+    industry: Optional[str],
+    revenue: Optional[str],
+    employees: Optional[str],
+    logo_path: Optional[str],
+):
+    """Create a closure used as reportlab's onFirstPage callback."""
+
+    def first_page(canvas, doc):
+        width, height = A4
+        header_h = 60 * mm
+
+        canvas.saveState()
+
+        # Top blue band
+        canvas.setFillColor(colors.HexColor("#003366"))
+        canvas.rect(0, height - header_h, width, header_h, fill=1, stroke=0)
+
+        # Logo (if available)
+        if logo_path and os.path.exists(logo_path):
+            logo_w = 35 * mm
+            logo_h = 18 * mm
+            x = 20 * mm
+            y = height - header_h + header_h / 2 - logo_h / 2
+            canvas.drawImage(
+                logo_path,
+                x,
+                y,
+                width=logo_w,
+                height=logo_h,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+
+        # Main title
+        canvas.setFillColor(colors.white)
+        canvas.setFont("Helvetica-Bold", 24)
+        canvas.drawString(60 * mm, height - 25 * mm, "Bivenue Copilot")
+
+        canvas.setFont("Helvetica", 11)
+        canvas.drawString(60 * mm, height - 34 * mm, title)
+
+        # Company profile box (right side)
+        box_w = 70 * mm
+        box_h = 40 * mm
+        x = width - box_w - 20 * mm
+        y = height - header_h + (header_h - box_h) / 2
+
+        canvas.setFillColor(colors.white)
+        canvas.roundRect(x, y, box_w, box_h, 4 * mm, fill=1, stroke=0)
+        canvas.setStrokeColor(colors.HexColor("#d0d0d0"))
+        canvas.roundRect(x, y, box_w, box_h, 4 * mm, fill=0, stroke=1)
+
+        canvas.setFillColor(colors.HexColor("#003366"))
+        canvas.setFont("Helvetica-Bold", 10)
+        canvas.drawString(x + 8, y + box_h - 12, "Company Profile")
+
+        canvas.setFillColor(colors.black)
+        canvas.setFont("Helvetica", 9)
+
+        line_y = y + box_h - 25
+        canvas.drawString(x + 8, line_y, f"Name: {company_name or 'Client'}")
+        line_y -= 12
+        canvas.drawString(x + 8, line_y, f"Industry: {industry or 'N/A'}")
+        if revenue:
+            line_y -= 12
+            canvas.drawString(x + 8, line_y, f"Revenue: {revenue}")
+        if employees:
+            line_y -= 12
+            canvas.drawString(x + 8, line_y, f"Employees: {employees}")
+
+        canvas.restoreState()
+
+    return first_page
+
+
+def _later_pages(canvas, doc):
+    """Header/footer for pages 2+."""
+    width, height = A4
+    canvas.saveState()
+
+    canvas.setFillColor(colors.HexColor("#003366"))
+    canvas.setFont("Helvetica", 9)
+    canvas.drawString(25 * mm, height - 15 * mm, "Bivenue Copilot – Finance Transformation Brief")
+    canvas.drawRightString(width - 25 * mm, height - 15 * mm, f"Page {doc.page}")
+
+    canvas.restoreState()
+
+
+def _ai_brief_to_flowables(text: str, styles) -> List:
+    """Turn the AI brief text into reportlab Paragraphs with light heading detection."""
+    flows: List = []
+
     if not text:
-        return y
+        return flows
 
-    lines = _wrap_text(text, draw, font, max_width)
-    for line in lines:
-        draw.text((x, y), line, font=font, fill=TEXT_DARK)
-        # estimate line height from textbbox
-        bbox = draw.textbbox((x, y), line, font=font)
-        line_height = bbox[3] - bbox[1]
-        y += line_height + line_spacing
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            flows.append(Spacer(1, 4 * mm))
+            continue
 
-    return y
+        # Simple numbered heading detection ("1. Something")
+        if line[0].isdigit() and (line[1:3] == ". " or line[1:3] == ".)"):
+            flows.append(Paragraph(f"<b>{line}</b>", styles["SectionHeading"]))
+        # Lines ending with ":" as mini headings
+        elif line.endswith(":"):
+            flows.append(Paragraph(f"<b>{line}</b>", styles["MiniHeading"]))
+        else:
+            flows.append(Paragraph(line, styles["BodyText"]))
 
+    return flows
 
-def _clean_markdown(text: str) -> str:
-    """
-    Remove the most obvious markdown markers so it looks nicer in PDF.
-    """
-    replacements = [
-        ("**", ""),
-        ("__", ""),
-        ("### ", ""),
-        ("## ", ""),
-        ("# ", ""),
-        ("\t", " "),
-    ]
-    for old, new in replacements:
-        text = text.replace(old, new)
-
-    # Normalise bullet markers
-    text = text.replace("- ", "• ")
-    text = text.replace("* ", "• ")
-
-    return text.strip()
-
-
-def _extract_title_from_ai(ai_brief: str) -> str:
-    """
-    Take the first line of the AI brief and convert it into a nice title.
-    Example input:
-        'Consulting Brief: Cultural Resistance Blocking Finance Transformation'
-    Output (for Option B):
-        'Bivenue Copilot – Cultural Resistance Blocking Finance Transformation'
-    """
-    if not ai_brief.strip():
-        return "Bivenue Copilot – Finance Transformation Brief"
-
-    first_line = ai_brief.strip().splitlines()[0]
-    first_line = first_line.lstrip("#").strip()
-
-    # If it starts with "Consulting Brief:", strip that label
-    lower = first_line.lower()
-    prefix = "consulting brief:"
-    if lower.startswith(prefix):
-        first_line = first_line[len(prefix):].strip()
-
-    if not first_line:
-        first_line = "Finance Transformation Brief"
-
-    return f"Bivenue Copilot – {first_line}"
-
-
-# -------------------------------------------------------------------------
-# Main export function
-# -------------------------------------------------------------------------
 
 def create_consulting_brief_pdf(
+    *,
     logo_path: Optional[str],
-    domain: str,
+    domain: Optional[str],
     challenge: str,
     rule_based_summary: str,
-    ai_brief: str,
-    company_name: str,
-    industry: str,
+    ai_brief: Optional[str],
+    company_name: Optional[str] = "Client",
+    industry: Optional[str] = "Finance",
     revenue: Optional[str] = None,
     employees: Optional[str] = None,
 ) -> bytes:
     """
-    Build a one-page consulting-style PDF (Gartner-like layout).
-    Returns raw PDF bytes.
+    Build a BCG-style, multi-page consulting brief PDF.
+
+    Parameters map directly from the app:
+    - logo_path: path to the Bivenue logo (relative to the repo root).
+    - domain: detected finance domain (Intercompany, R2R, etc.).
+    - challenge: original user problem statement.
+    - rule_based_summary: markdown/text with focus areas & actions.
+    - ai_brief: long-form AI analysis (Consulting Brief: ...).
     """
-    # 1) Canvas
-    img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), "white")
-    draw = ImageDraw.Draw(img)
 
-    # Fonts
-    font_title = _load_font(90)
-    font_subtitle = _load_font(52)
-    font_heading = _load_font(54)
-    font_body = _load_font(38)
-    font_small = _load_font(34)
+    buffer = BytesIO()
+    styles = _build_styles()
 
-    # 2) Header bar
-    draw.rectangle([0, 0, PAGE_WIDTH, HEADER_HEIGHT], fill=BRAND_BLUE)
-
-    # Title (from AI brief, branded)
-    title_text = _extract_title_from_ai(ai_brief)
-    title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
-    title_width = title_bbox[2] - title_bbox[0]
-    title_x = MARGIN_X
-    title_y = 110
-    draw.text((title_x, title_y), title_text, font=font_title, fill="white")
-
-    # Subtitle
-    subtitle_text = "AI-generated Finance Transformation Consulting Brief"
-    draw.text(
-        (title_x, title_y + 120),
-        subtitle_text,
-        font=font_subtitle,
-        fill="white",
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=25 * mm,
+        rightMargin=25 * mm,
+        topMargin=30 * mm,
+        bottomMargin=20 * mm,
     )
 
-    # Optional logo (left side of header)
-    if logo_path:
-        try:
-            logo = Image.open(logo_path).convert("RGBA")
-            # Fit height ~160 px
-            desired_h = 160
-            ratio = desired_h / logo.height
-            new_size = (int(logo.width * ratio), desired_h)
-            logo = logo.resize(new_size, Image.LANCZOS)
+    story: list = []
 
-            logo_x = PAGE_WIDTH - new_size[0] - MARGIN_X
-            logo_y = (HEADER_HEIGHT - new_size[1]) // 2
-            img.paste(logo, (logo_x, logo_y), mask=logo)
-        except Exception:
-            # If anything fails, we silently ignore the logo
-            pass
+    # -------- PAGE 1 CONTENT (below the hero band) -------- #
 
-    # 3) Company profile box (top-right, inside white area)
-    box_w = 620
-    box_h = 260
-    box_x = PAGE_WIDTH - box_w - MARGIN_X
-    box_y = HEADER_HEIGHT + 40
+    # Leave vertical space so we don't overwrite the blue header bar
+    story.append(Spacer(1, 75 * mm))
 
-    draw.rectangle(
-        [box_x, box_y, box_x + box_w, box_y + box_h],
-        outline=BRAND_BLUE,
-        width=4,
-        fill="white",
+    # Three-column “Mission / How Bivenue helped / Outcome” grid
+    mini = styles["MiniHeading"]
+    body_small = styles["BodySmall"]
+
+    mission_text = f"Mission-critical priority: {domain or 'Finance transformation'}"
+    how_helped_text = rule_based_summary or "—"
+    outcome_intro = (ai_brief or "").strip()
+    if len(outcome_intro) > 650:
+        outcome_intro = outcome_intro[:650].rsplit(" ", 1)[0] + "…"
+
+    table_data = [
+        [
+            Paragraph("<b>Mission-critical priority</b>", mini),
+            Paragraph("<b>How Bivenue helped</b>", mini),
+            Paragraph("<b>Outcome & AI deep-dive insights</b>", mini),
+        ],
+        [
+            Paragraph(mission_text, body_small),
+            Paragraph(how_helped_text, body_small),
+            Paragraph(outcome_intro or "AI analysis not available.", body_small),
+        ],
+    ]
+
+    table = Table(
+        table_data,
+        colWidths=[60 * mm, 70 * mm, 60 * mm],
+        hAlign="LEFT",
+    )
+    table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
+                ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#d0d0d0")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
     )
 
-    draw.text(
-        (box_x + 32, box_y + 24),
-        "Company Profile",
-        font=font_heading,
-        fill=BRAND_BLUE,
+    story.append(KeepTogether(table))
+    story.append(Spacer(1, 12 * mm))
+
+    # Short note at bottom of page 1
+    story.append(
+        Paragraph(
+            "This brief was generated by <b>Bivenue Copilot</b> – AI-assisted Finance Transformation Advisor.",
+            styles["BodySmall"],
+        )
     )
 
-    profile_y = box_y + 110
-    draw.text((box_x + 32, profile_y), f"Name: {company_name}", font=font_small, fill=TEXT_DARK)
-    profile_y += 52
-    draw.text((box_x + 32, profile_y), f"Industry: {industry}", font=font_small, fill=TEXT_DARK)
-    profile_y += 52
+    # Move to detailed pages
+    story.append(PageBreak())
 
-    if revenue:
-        draw.text((box_x + 32, profile_y), f"Revenue: {revenue}", font=font_small, fill=TEXT_DARK)
-        profile_y += 52
-    if employees:
-        draw.text((box_x + 32, profile_y), f"Employees: {employees}", font=font_small, fill=TEXT_DARK)
+    # -------- PAGES 2+ : FULL AI BRIEF -------- #
 
-    # 4) Three-column layout
-    # Available width under the header, excluding margins and gap
-    total_width = PAGE_WIDTH - 2 * MARGIN_X - COLUMN_GAP * 2
-    col_width = total_width // 3
+    story.append(Paragraph("Consulting Brief – Full Analysis", styles["SectionHeading"]))
+    story.append(Spacer(1, 2 * mm))
 
-    col1_x = MARGIN_X
-    col2_x = col1_x + col_width + COLUMN_GAP
-    col3_x = col2_x + col_width + COLUMN_GAP
-    start_y = MARGIN_TOP
+    # Original challenge
+    story.append(Paragraph("<b>Original challenge</b>", styles["MiniHeading"]))
+    story.append(Paragraph(challenge, styles["BodyText"]))
+    story.append(Spacer(1, 8 * mm))
 
-    # Column 1: Mission-critical priority
-    heading_y = start_y
-    draw.text(
-        (col1_x, heading_y),
-        "Mission-critical priority",
-        font=font_heading,
-        fill=BRAND_BLUE,
-    )
-    heading_y += 80
+    if ai_brief:
+        # Convert AI narrative into nice paragraphs & headings
+        flows = _ai_brief_to_flowables(ai_brief, styles)
+        story.extend(flows)
+    else:
+        story.append(
+            Paragraph(
+                "AI analysis was not available for this case. Only the rule-based diagnostic is shown.",
+                styles["BodyText"],
+            )
+        )
 
-    mc_text = f"Mission-critical priority: {domain}\n\n{challenge}"
-    mc_text = _clean_markdown(mc_text)
-    _draw_paragraph(draw, mc_text, font_body, col1_x, heading_y, col_width)
+    # -------- Build document -------- #
 
-    # Column 2: How Bivenue helped (rule-based summary)
-    heading_y = start_y
-    draw.text(
-        (col2_x, heading_y),
-        "How Bivenue helped",
-        font=font_heading,
-        fill=BRAND_BLUE,
-    )
-    heading_y += 80
+    title = f"{domain or 'Finance'} Consulting Brief"
 
-    helped_text = _clean_markdown(rule_based_summary)
-    _draw_paragraph(draw, helped_text, font_body, col2_x, heading_y, col_width)
-
-    # Column 3: Outcome & AI deep-dive insights (AI brief)
-    heading_y = start_y
-    draw.text(
-        (col3_x, heading_y),
-        "Outcome & AI deep-dive insights",
-        font=font_heading,
-        fill=BRAND_BLUE,
-    )
-    heading_y += 80
-
-    ai_text = _clean_markdown(ai_brief)
-    _draw_paragraph(draw, ai_text, font_body, col3_x, heading_y, col_width)
-
-    # Footer note
-    footer_text = (
-        "This brief was generated by Bivenue Copilot – an AI-assisted Finance Transformation Advisor."
-    )
-    footer_y = PAGE_HEIGHT - 160
-    _draw_paragraph(
-        draw,
-        footer_text,
-        font_small,
-        MARGIN_X,
-        footer_y,
-        PAGE_WIDTH - 2 * MARGIN_X,
-        line_spacing=4,
+    first_page_cb = _make_first_page_drawer(
+        title=title,
+        company_name=company_name,
+        industry=industry,
+        revenue=revenue,
+        employees=employees,
+        logo_path=logo_path,
     )
 
-    # 5) Convert to PDF bytes
-    output = io.BytesIO()
-    img.save(output, format="PDF")
-    output.seek(0)
-    return output.read()
+    doc.build(story, onFirstPage=first_page_cb, onLaterPages=_later_pages)
+
+    pdf_value = buffer.getvalue()
+    buffer.close()
+    return pdf_value
