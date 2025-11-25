@@ -132,17 +132,16 @@ def render_ai_section(
         st.markdown(ai_brief)
 
         # --- Build branded PDF and expose download button ---
-        pdf_bytes = create_consulting_brief_pdf(
-            logo_path="engine/bivenue_logo.png",  # <- updated path
-            domain=domain,
-            challenge=challenge,
-            rule_based_summary=recommendations,
-            ai_brief=ai_brief,
-            company_name="Butterfield-style Client",  # can be made dynamic later
-            industry="Finance",
-            revenue=None,
-            employees=None,
-        )
+       pdf_bytes = create_consulting_brief_pdf(
+    domain=domain,
+    challenge=challenge,
+    rule_based_summary=recommendations,
+    ai_brief=ai_brief,
+    company_name="Butterfield-style Client",
+    industry="Finance",
+    revenue=None,
+    employees=None,
+)
 
         st.download_button(
             label="📥 Download 1-page consulting brief (PDF)",
