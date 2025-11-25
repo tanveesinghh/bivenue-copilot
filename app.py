@@ -1,3 +1,4 @@
+from engine.pdf_export import create_consulting_brief_pdf
 from typing import Optional
 
 import streamlit as st
@@ -5,8 +6,6 @@ import streamlit as st
 from engine.classifier import classify_domain
 from engine.generator import generate_recommendations
 from engine.llm import generate_ai_analysis, LLMNotConfigured
-from engine.pdf_export import create_consulting_brief_pdf
-
 
 st.set_page_config(page_title="Bivenue Copilot", layout="wide")
 
@@ -29,16 +28,11 @@ NON_FINANCE_TOPICS = [
 
 
 def validate_challenge_input(text: str) -> str | None:
-    """
-    Returns an error message string if the input is not allowed,
-    otherwise returns None (meaning it's safe to process).
-    """
     if not text:
         return "Please describe your finance transformation challenge first."
 
     lowered = text.lower()
 
-    # Block obviously disallowed / NSFW / illegal content
     for word in FORBIDDEN_KEYWORDS:
         if word in lowered:
             return (
@@ -47,7 +41,6 @@ def validate_challenge_input(text: str) -> str | None:
                 "intent is not allowed."
             )
 
-    # Gently push away non-finance topics
     for word in NON_FINANCE_TOPICS:
         if word in lowered:
             return (
@@ -56,7 +49,6 @@ def validate_challenge_input(text: str) -> str | None:
                 "intercompany, consolidation, close, or process/tech/people change."
             )
 
-    # Optional: very long input guard
     if len(text) > 4000:
         return (
             "Your description is a bit too long. Please summarise the challenge "
@@ -104,16 +96,12 @@ def render_result(domain: str, recommendations: str, challenge: str) -> None:
     )
 
 
-def render_ai_section(
-    challenge: str,
-    domain: str,
-    recommendations: str,
-) -> None:
+def render_ai_section(challenge: str, domain: str, recommendations: str) -> None:
     st.divider()
     st.subheader("3) AI deep-dive analysis (experimental)")
 
-    ai_brief: Optional[str] = None
-    ai_error: Optional[str] = None
+    ai_brief = None
+    ai_error = None
 
     try:
         with st.spinner("Asking the AI copilot for a deeper analysis..."):
@@ -128,20 +116,19 @@ def render_ai_section(
         ai_error = f"AI error: {e}"
 
     if ai_brief:
-        # Show the AI analysis on screen
         st.markdown(ai_brief)
 
-        # --- Build branded PDF and expose download button ---
-       pdf_bytes = create_consulting_brief_pdf(
-    domain=domain,
-    challenge=challenge,
-    rule_based_summary=recommendations,
-    ai_brief=ai_brief,
-    company_name="Butterfield-style Client",
-    industry="Finance",
-    revenue=None,
-    employees=None,
-)
+        pdf_bytes = create_consulting_brief_pdf(
+            logo_path="engine/bivenue_logo.png",  # <-- your correct path
+            domain=domain,
+            challenge=challenge,
+            rule_based_summary=recommendations,
+            ai_brief=ai_brief,
+            company_name="Client",
+            industry="Finance",
+            revenue=None,
+            employees=None,
+        )
 
         st.download_button(
             label="📥 Download 1-page consulting brief (PDF)",
@@ -150,7 +137,7 @@ def render_ai_section(
             mime="application/pdf",
         )
 
-    elif ai_error:
+    if ai_error:
         st.warning(ai_error)
 
 
@@ -159,13 +146,11 @@ def main() -> None:
     challenge = render_input()
 
     if st.button("Diagnose", type="primary"):
-        # 1) Run our content filter first
         error_message = validate_challenge_input(challenge.strip())
         if error_message:
             st.warning(error_message)
             return
 
-        # 2) If safe, continue with rule-based engine
         with st.spinner("Running rule-based diagnostic..."):
             domain = classify_domain(challenge)
             recommendations = generate_recommendations(domain, challenge)
