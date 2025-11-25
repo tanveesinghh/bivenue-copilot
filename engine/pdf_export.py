@@ -1,60 +1,111 @@
-# engine/pdf_export.py
-
-from io import BytesIO
-from typing import Optional
+import io
+from typing import Tuple, Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
+# --- Brand & layout constants -------------------------------------------------
 
-# Try to load fonts that look a bit more “consulting deck” style.
-# If these fail on Streamlit Cloud, Pillow will fall back to a default font.
-def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    try:
-        if bold:
-            return ImageFont.truetype("arialbd.ttf", size)
-        return ImageFont.truetype("arial.ttf", size)
-    except Exception:
-        return ImageFont.load_default()
+DARK_BLUE = "#003366"
+ACCENT_BLUE = "#00bcd4"
+TEXT_BLACK = "#000000"
+TEXT_GREY = "#555555"
+PAGE_WIDTH, PAGE_HEIGHT = 2480, 3508  # A4 at 300 dpi
+
+MARGIN_X = 180
+MARGIN_TOP = 260
+COLUMN_GAP = 80
 
 
-def _wrap_text(text: str, font: ImageFont.ImageFont, max_width: int, draw: ImageDraw.ImageDraw) -> list[str]:
-    """Simple word-wrap helper."""
+# --- Font helpers -------------------------------------------------------------
+
+
+def _load_font(size: int) -> ImageFont.FreeTypeFont:
+    """
+    Try to load a decent TTF font. If not available in the environment,
+    gracefully fall back to Pillow's default bitmap font.
+    """
+    # You can change this to another common font if you prefer.
+    for name in ["DejaVuSans.ttf", "arial.ttf", "Helvetica.ttf"]:
+        try:
+            return ImageFont.truetype(name, size=size)
+        except Exception:
+            continue
+
+    # Fallback
+    return ImageFont.load_default()
+
+
+def _measure_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+) -> Tuple[int, int]:
+    """
+    Measure text size using textbbox (works on newer Pillow versions).
+    Returns (width, height).
+    """
+    if not text:
+        return 0, 0
+
+    bbox = draw.textbbox((0, 0), text, font=font)
+    width = bbox[2] - bbox[0]
+    height = bbox[3] - bbox[1]
+    return width, height
+
+
+def _wrap_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: int,
+) -> str:
+    """
+    Very simple word-wrap helper: returns text with '\n' inserted so that
+    each line is <= max_width pixels (approx).
+    """
     words = text.split()
-    lines: list[str] = []
-    current = ""
+    if not words:
+        return ""
 
-    for w in words:
-        test = (current + " " + w).strip()
-        w_width, _ = draw.textsize(test, font=font)
-        if w_width <= max_width or not current:
-            current = test
+    lines = []
+    current = words[0]
+
+    for word in words[1:]:
+        candidate = current + " " + word
+        w_width, _ = _measure_text(draw, candidate, font)
+        if w_width <= max_width:
+            current = candidate
         else:
             lines.append(current)
-            current = w
-    if current:
-        lines.append(current)
-    return lines
+            current = word
+
+    lines.append(current)
+    return "\n".join(lines)
 
 
 def _draw_paragraph(
     draw: ImageDraw.ImageDraw,
     text: str,
+    font: ImageFont.FreeTypeFont,
     x: int,
     y: int,
-    width: int,
-    font: ImageFont.ImageFont,
-    fill: str = "black",
-    line_spacing: int = 4,
+    max_width: int,
+    line_spacing: int = 6,
+    fill: str = TEXT_BLACK,
 ) -> int:
     """
-    Draws a multi-line paragraph and returns the new y position
-    (just after the last line).
+    Draw a multi-line paragraph (with wrapping) starting at (x, y).
+    Returns the new y position just after the paragraph.
     """
-    for line in _wrap_text(text, font, width, draw):
+    wrapped = _wrap_text(draw, text, font, max_width)
+    for line in wrapped.split("\n"):
         draw.text((x, y), line, font=font, fill=fill)
-        _, h = draw.textsize(line, font=font)
+        _, h = _measure_text(draw, line, font)
         y += h + line_spacing
     return y
+
+
+# --- Main export function -----------------------------------------------------
 
 
 def create_consulting_brief_pdf(
@@ -62,193 +113,274 @@ def create_consulting_brief_pdf(
     domain: str,
     challenge: str,
     rule_based_summary: str,
-    ai_brief: str,
+    ai_brief: Optional[str],
     company_name: str,
     industry: str,
     revenue: Optional[str] = None,
     employees: Optional[str] = None,
 ) -> bytes:
     """
-    Generate a 1-page branded PDF in a Gartner-style layout.
+    Build a single-page consulting brief PDF with Bivenue branding.
 
-    - Dark-blue header band
-    - Logo + title on the left
-    - Company profile card on the right
-    - Three columns: Mission, How Bivenue helped, Outcome (AI brief)
+    Returns: raw PDF bytes suitable for st.download_button(data=...).
     """
 
-    # --- Page setup (A4-ish, landscape) ---
-    width, height = 1754, 1240  # ~A4 landscape
-    bg_color = "white"
-    header_height = 170
-    brand_blue = "#003B73"  # dark blue
-    accent_blue = "#00B4FF"
+    # Base "page" as an RGB image we will save as PDF
+    img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), "white")
+    draw = ImageDraw.Draw(img)
 
-    image = Image.new("RGB", (width, height), color=bg_color)
-    draw = ImageDraw.Draw(image)
+    # Load fonts
+    title_font = _load_font(80)
+    subtitle_font = _load_font(40)
+    heading_font = _load_font(46)
+    label_font = _load_font(32)
+    body_font = _load_font(32)
+    tiny_font = _load_font(20)
 
-    # --- Fonts ---
-    title_font = _load_font(40, bold=True)
-    subtitle_font = _load_font(22)
-    section_title_font = _load_font(24, bold=True)
-    body_font = _load_font(18)
-    small_font = _load_font(14)
+    # --- Top bar ----------------------------------------------------------------
+    draw.rectangle(
+        [(0, 0), (PAGE_WIDTH, 220)],
+        fill=DARK_BLUE,
+    )
 
-    # --- Header band ---
-    draw.rectangle([(0, 0), (width, header_height)], fill=brand_blue)
-
-    # --- Logo on left side of header ---
-    x_logo = 40
-    y_logo = 25
-    logo_max_h = 90
-    logo_max_w = 260
-
+    # Logo (left)
     if logo_path:
         try:
             logo = Image.open(logo_path).convert("RGBA")
-            # scale down to fit box
-            lw, lh = logo.size
-            scale = min(logo_max_w / lw, logo_max_h / lh, 1.0)
-            new_size = (int(lw * scale), int(lh * scale))
+            # Scale logo to fit nicely in the top bar
+            target_height = 140
+            ratio = target_height / logo.height
+            new_size = (int(logo.width * ratio), target_height)
             logo = logo.resize(new_size, Image.LANCZOS)
-            image.paste(logo, (x_logo, y_logo), logo)
+
+            logo_x = MARGIN_X
+            logo_y = 40
+            img.paste(logo, (logo_x, logo_y), logo)
         except Exception:
-            # If logo fails to load we just skip it
+            # If we can't load logo, just skip
             pass
 
-    # --- Title + subtitle in header ---
-    title_x = x_logo + logo_max_w + 30
-    title_y = 45
-    draw.text((title_x, title_y), "Bivenue Copilot", font=title_font, fill="white")
-    subtitle_y = title_y + 50
+    # Title (centre-ish)
+    title_text = "Bivenue Copilot"
+    subtitle_text = "Intercompany Consulting Brief"
+
+    _, title_h = _measure_text(draw, title_text, title_font)
+    _, subtitle_h = _measure_text(draw, subtitle_text, subtitle_font)
+
+    center_x = PAGE_WIDTH // 2
+    title_w, _ = _measure_text(draw, title_text, title_font)
+    subtitle_w, _ = _measure_text(draw, subtitle_text, subtitle_font)
+
     draw.text(
-        (title_x, subtitle_y),
-        f"{domain} Consulting Brief",
+        (center_x - title_w // 2, 60),
+        title_text,
+        font=title_font,
+        fill="white",
+    )
+    draw.text(
+        (center_x - subtitle_w // 2, 60 + title_h + 10),
+        subtitle_text,
         font=subtitle_font,
         fill="white",
     )
 
-    # --- Company profile card (right in header) ---
-    card_width = 380
-    card_height = header_height - 40
-    card_x = width - card_width - 30
-    card_y = 20
+    # Company profile box (top-right)
+    box_width = 650
+    box_height = 260
+    box_x1 = PAGE_WIDTH - MARGIN_X - box_width
+    box_y1 = 40
+    box_x2 = box_x1 + box_width
+    box_y2 = box_y1 + box_height
 
     draw.rounded_rectangle(
-        [(card_x, card_y), (card_x + card_width, card_y + card_height)],
-        radius=16,
+        [box_x1, box_y1, box_x2, box_y2],
+        radius=30,
         fill="white",
+        outline=None,
     )
 
-    cp_title_y = card_y + 16
-    draw.text((card_x + 20, cp_title_y), "Company Profile", font=section_title_font, fill=brand_blue)
-
-    info_y = cp_title_y + 40
-    info_y = _draw_paragraph(
-        draw,
-        f"Name: {company_name}",
-        card_x + 20,
-        info_y,
-        card_width - 40,
-        body_font,
-        fill="black",
-    )
-    info_y = _draw_paragraph(
-        draw,
-        f"Industry: {industry}",
-        card_x + 20,
-        info_y,
-        card_width - 40,
-        body_font,
-        fill="black",
-    )
-    if revenue:
-        info_y = _draw_paragraph(
-            draw,
-            f"Revenue: {revenue}",
-            card_x + 20,
-            info_y,
-            card_width - 40,
-            body_font,
-            fill="black",
-        )
-    if employees:
-        _ = _draw_paragraph(
-            draw,
-            f"Employees: {employees}",
-            card_x + 20,
-            info_y,
-            card_width - 40,
-            body_font,
-            fill="black",
-        )
-
-    # --- Thin accent line under header ---
-    draw.rectangle([(0, header_height), (width, header_height + 6)], fill=accent_blue)
-
-    # --- Column layout below header ---
-    top = header_height + 30
-    margin_x = 40
-    usable_width = width - 2 * margin_x
-    col_gap = 40
-    col_width = int((usable_width - 2 * col_gap) / 3)
-
-    col1_x = margin_x
-    col2_x = col1_x + col_width + col_gap
-    col3_x = col2_x + col_width + col_gap
-
-    # --- Column 1: Mission-critical priority ---
-    y1 = top
-    draw.text((col1_x, y1), "Mission-critical priority", font=section_title_font, fill=brand_blue)
-    y1 += 32
-    # accent line
-    draw.line([(col1_x, y1), (col1_x + col_width, y1)], fill=accent_blue, width=4)
-    y1 += 16
-
-    mission_text = f"Mission-critical priority:\n{domain}"
-    y1 = _draw_paragraph(draw, mission_text, col1_x, y1, col_width, body_font)
-
-    # --- Column 2: How Bivenue helped ---
-    y2 = top
-    draw.text((col2_x, y2), "How Bivenue helped", font=section_title_font, fill=brand_blue)
-    y2 += 32
-    draw.line([(col2_x, y2), (col2_x + col_width, y2)], fill=accent_blue, width=4)
-    y2 += 16
-
-    # Re-use the rule-based recommendations as bullets
-    how_text = "How Bivenue helped:\n" + rule_based_summary
-    y2 = _draw_paragraph(draw, how_text, col2_x, y2, col_width, body_font)
-
-    # --- Column 3: Outcome (AI brief) ---
-    y3 = top
-    draw.text((col3_x, y3), "Outcome", font=section_title_font, fill=brand_blue)
-    y3 += 32
-    draw.line([(col3_x, y3), (col3_x + col_width, y3)], fill=accent_blue, width=4)
-    y3 += 16
-
-    outcome_intro = "Outcome & AI deep-dive insights:"
-    y3 = _draw_paragraph(draw, outcome_intro, col3_x, y3, col_width, body_font)
-
-    # We don’t want to repeat the title if the AI brief starts with "# Intercompany…"
-    cleaned_ai_brief = ai_brief.strip()
-    if cleaned_ai_brief.startswith("#"):
-        # Drop the first line (the Markdown heading)
-        cleaned_ai_brief = "\n".join(cleaned_ai_brief.splitlines()[1:]).strip()
-
-    y3 = _draw_paragraph(draw, cleaned_ai_brief, col3_x, y3, col_width, small_font)
-
-    # --- Footer note ---
-    footer_text = "This brief was generated by Bivenue Copilot – AI-assisted Finance Transformation Advisor."
-    fw, fh = draw.textsize(footer_text, font=small_font)
+    prof_title = "Company Profile"
     draw.text(
-        ((width - fw) // 2, height - fh - 20),
-        footer_text,
-        font=small_font,
-        fill=brand_blue,
+        (box_x1 + 40, box_y1 + 30),
+        prof_title,
+        font=heading_font,
+        fill=DARK_BLUE,
     )
 
-    # --- Export to PDF ---
-    buffer = BytesIO()
-    image.save(buffer, format="PDF")
-    buffer.seek(0)
-    return buffer.getvalue()
+    info_y = box_y1 + 110
+    info_x = box_x1 + 40
+
+    def _line(label: str, value: Optional[str]):
+        nonlocal info_y
+        if value is None:
+            return
+        draw.text(
+            (info_x, info_y),
+            f"{label}: {value}",
+            font=label_font,
+            fill=TEXT_BLACK,
+        )
+        info_y += 46
+
+    _line("Name", company_name)
+    _line("Industry", industry)
+    _line("Revenue", revenue)
+    _line("Employees", employees)
+
+    # --- Body columns ----------------------------------------------------------
+
+    # Column widths (three columns)
+    total_body_width = PAGE_WIDTH - 2 * MARGIN_X
+    col_width = (total_body_width - 2 * COLUMN_GAP) // 3
+
+    col1_x = MARGIN_X
+    col2_x = col1_x + col_width + COLUMN_GAP
+    col3_x = col2_x + col_width + COLUMN_GAP
+
+    body_top_y = MARGIN_TOP
+
+    # --- Column 1: Mission-critical priority -----------------------------------
+
+    # Section heading
+    draw.text(
+        (col1_x, body_top_y),
+        "Mission-critical priority",
+        font=heading_font,
+        fill=TEXT_BLACK,
+    )
+    # Accent line
+    heading_w, heading_h = _measure_text(draw, "Mission-critical priority", heading_font)
+    draw.line(
+        [(col1_x, body_top_y + heading_h + 8), (col1_x + heading_w, body_top_y + heading_h + 8)],
+        fill=ACCENT_BLUE,
+        width=6,
+    )
+
+    y = body_top_y + heading_h + 30
+    draw.text(
+        (col1_x, y),
+        "Mission-critical priority:",
+        font=label_font,
+        fill=TEXT_GREY,
+    )
+    y += 50
+
+    # Use the original challenge as the mission-critical description
+    y = _draw_paragraph(
+        draw,
+        challenge,
+        body_font,
+        x=col1_x,
+        y=y,
+        max_width=col_width,
+        line_spacing=8,
+        fill=TEXT_BLACK,
+    )
+
+    # --- Column 2: How Bivenue helped -----------------------------------------
+
+    draw.text(
+        (col2_x, body_top_y),
+        "How Bivenue helped",
+        font=heading_font,
+        fill=TEXT_BLACK,
+    )
+    heading_w2, heading_h2 = _measure_text(draw, "How Bivenue helped", heading_font)
+    draw.line(
+        [(col2_x, body_top_y + heading_h2 + 8), (col2_x + heading_w2, body_top_y + heading_h2 + 8)],
+        fill=ACCENT_BLUE,
+        width=6,
+    )
+
+    y2 = body_top_y + heading_h2 + 30
+    draw.text(
+        (col2_x, y2),
+        "How Bivenue helped:",
+        font=label_font,
+        fill=TEXT_GREY,
+    )
+    y2 += 50
+
+    # The rule-based summary can be long markdown; we strip bullet markers
+    cleaned_summary = (
+        rule_based_summary.replace("*", "").replace("-", "").replace("#", "").strip()
+    )
+
+    y2 = _draw_paragraph(
+        draw,
+        cleaned_summary,
+        body_font,
+        x=col2_x,
+        y=y2,
+        max_width=col_width,
+        line_spacing=8,
+        fill=TEXT_BLACK,
+    )
+
+    # --- Column 3: AI deep-dive / Outcome --------------------------------------
+
+    draw.text(
+        (col3_x, body_top_y),
+        "Outcome",
+        font=heading_font,
+        fill=TEXT_BLACK,
+    )
+    heading_w3, heading_h3 = _measure_text(draw, "Outcome", heading_font)
+    draw.line(
+        [(col3_x, body_top_y + heading_h3 + 8), (col3_x + heading_w3, body_top_y + heading_h3 + 8)],
+        fill=ACCENT_BLUE,
+        width=6,
+    )
+
+    y3 = body_top_y + heading_h3 + 30
+
+    draw.text(
+        (col3_x, y3),
+        "Outcome & AI deep-dive insights:",
+        font=label_font,
+        fill=TEXT_GREY,
+    )
+    y3 += 50
+
+    if not ai_brief:
+        ai_brief = "AI analysis was not available for this case."
+
+    cleaned_ai = ai_brief.strip()
+
+    # Wrap & draw the AI analysis
+    y3 = _draw_paragraph(
+        draw,
+        cleaned_ai,
+        body_font,
+        x=col3_x,
+        y=y3,
+        max_width=col_width,
+        line_spacing=8,
+        fill=TEXT_BLACK,
+    )
+
+    # --- Footer ----------------------------------------------------------------
+
+    footer_text = (
+        "This brief was generated by Bivenue Copilot – AI-assisted Finance Transformation Advisor."
+    )
+    footer_w, footer_h = _measure_text(draw, footer_text, tiny_font)
+    footer_x = MARGIN_X
+    footer_y = PAGE_HEIGHT - 200
+
+    draw.text(
+        (footer_x, footer_y),
+        footer_text,
+        font=tiny_font,
+        fill=TEXT_GREY,
+    )
+
+    # --- Export to PDF bytes ---------------------------------------------------
+
+    output = io.BytesIO()
+    # Pillow can save a single-page PDF directly from an RGB image
+    img.save(output, format="PDF", resolution=300.0)
+    pdf_bytes = output.getvalue()
+    output.close()
+
+    return pdf_bytes
