@@ -33,6 +33,7 @@ def validate_challenge_input(text: str) -> str | None:
 
     lowered = text.lower()
 
+    # Block obviously disallowed / NSFW / illegal content
     for word in FORBIDDEN_KEYWORDS:
         if word in lowered:
             return (
@@ -41,6 +42,7 @@ def validate_challenge_input(text: str) -> str | None:
                 "intent is not allowed."
             )
 
+    # Gently push away non-finance topics
     for word in NON_FINANCE_TOPICS:
         if word in lowered:
             return (
@@ -49,6 +51,7 @@ def validate_challenge_input(text: str) -> str | None:
                 "intercompany, consolidation, close, or process/tech/people change."
             )
 
+    # Very long input guard
     if len(text) > 4000:
         return (
             "Your description is a bit too long. Please summarise the challenge "
@@ -100,8 +103,8 @@ def render_ai_section(challenge: str, domain: str, recommendations: str) -> None
     st.divider()
     st.subheader("3) AI deep-dive analysis (experimental)")
 
-    ai_brief = None
-    ai_error = None
+    ai_brief: Optional[str] = None
+    ai_error: Optional[str] = None
 
     try:
         with st.spinner("Asking the AI copilot for a deeper analysis..."):
@@ -115,28 +118,31 @@ def render_ai_section(challenge: str, domain: str, recommendations: str) -> None
     except Exception as e:
         ai_error = f"AI error: {e}"
 
+    # If we got a brief, show it and build the PDF
     if ai_brief:
-    st.markdown(ai_brief)
+        st.markdown(ai_brief)
 
-    pdf_bytes = create_consulting_brief_pdf(
-        logo_path="engine/bivenue_logo.png",  # adjust if your logo lives elsewhere
-        domain=domain,
-        challenge=challenge,
-        rule_based_summary=recommendations,
-        ai_brief=ai_brief,
-        company_name="Client",          # later you can expose as inputs
-        industry="Finance",
-        revenue=None,
-        employees=None,
-    )
+        pdf_bytes = create_consulting_brief_pdf(
+            logo_path="engine/bivenue_logo.png",  # adjust if your logo lives elsewhere
+            domain=domain,
+            challenge=challenge,
+            rule_based_summary=recommendations,
+            ai_brief=ai_brief,
+            company_name="Client",  # later you can expose as inputs
+            industry="Finance",
+            revenue=None,
+            employees=None,
+        )
 
-    st.download_button(
-        label="📥 Download 1-page consulting brief (PDF)",
-        data=pdf_bytes,
-        file_name="bivenue_finance_brief.pdf",
-        mime="application/pdf",
-    )
-    if ai_error:
+        st.download_button(
+            label="📥 Download 1-page consulting brief (PDF)",
+            data=pdf_bytes,
+            file_name="bivenue_finance_brief.pdf",
+            mime="application/pdf",
+        )
+
+    # If no brief but we have an error, show the error
+    elif ai_error:
         st.warning(ai_error)
 
 
@@ -145,11 +151,13 @@ def main() -> None:
     challenge = render_input()
 
     if st.button("Diagnose", type="primary"):
+        # 1) Content filter
         error_message = validate_challenge_input(challenge.strip())
         if error_message:
             st.warning(error_message)
             return
 
+        # 2) Rule-based engine
         with st.spinner("Running rule-based diagnostic..."):
             domain = classify_domain(challenge)
             recommendations = generate_recommendations(domain, challenge)
