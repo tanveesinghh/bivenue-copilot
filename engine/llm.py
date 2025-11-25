@@ -2,118 +2,113 @@
 
 import os
 from typing import Optional
+
 from openai import OpenAI
 
-# ------------------------------------------
-# Exception used when key is missing or invalid
-# ------------------------------------------
+
 class LLMNotConfigured(Exception):
-    """Raised when the OpenAI API key is missing or invalid."""
+    """Raised when the OpenAI API key is not configured."""
     pass
 
 
-# ------------------------------------------
-# System Prompt – Consulting Grade
-# ------------------------------------------
-SYSTEM_PROMPT = """
-You are Bivenue Copilot — an elite Finance Transformation Advisor with expertise in:
-- SAP S/4HANA, Oracle, NetSuite
-- BlackLine, Anaplan, Power BI
-- Global Intercompany, R2R, P2P, O2C, FP&A
-- Close acceleration, automation, and finance operating models
-
-Your mission:
-Produce a consulting-grade, CFO-facing transformation brief.
-
-MANDATORY RULES:
-- NO generic advice. NO repeating yourself. NO filler.
-- Diagnose like a senior consultant from McKinsey / BCG / Bain / Accenture.
-- Reference systems and processes explicitly (SAP, BlackLine, Anaplan, etc.) when relevant.
-- Use sharp, short bullets. Executive-level tone.
-- Assume the reader is a CFO, Finance Director or GBS Leader.
-- Follow the EXACT structure below:
-
-# Consulting Brief: {short title}
-
-## 1. Context & Problem Summary
-Short CFO-level summary (3–6 lines).
-
-## 2. Root Causes
-3–7 sharp, non-generic root causes across process, data, systems, org, or governance.
-
-## 3. Quick Wins (0–3 months)
-Concrete, high-impact actions that give momentum.
-
-## 4. Roadmap (3–6 months)
-Medium-term structural fixes (process, data, systems, operating model).
-
-## 5. Roadmap (6–12 months)
-Scale, automation, analytics, target-operating-model redesign.
-
-## 6. Risks & Mitigation
-Key risks with practical mitigation pairs.
-
-## 7. KPIs & Value Story
-Measurable KPIs with targets + business value narrative.
-
-Write like a real consultant.
-No fluff. No repeating lines. No long paragraphs.
-"""
-
-
-# ------------------------------------------
-# Build the OpenAI client safely
-# ------------------------------------------
-def _build_client() -> OpenAI:
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key or len(api_key) < 20:
+def _get_client() -> OpenAI:
+    """
+    Returns an OpenAI client, or raises LLMNotConfigured if the API key is missing.
+    """
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        # Streamlit Cloud: you probably set this in Secrets.
         raise LLMNotConfigured(
-            "AI is not configured yet. Please set OPENAI_API_KEY in your Streamlit secrets."
+            "AI analysis is not configured yet. Please add OPENAI_API_KEY "
+            "to your Streamlit secrets or environment."
         )
-
-    try:
-        client = OpenAI(api_key=api_key)
-    except Exception:
-        raise LLMNotConfigured(
-            "Your OpenAI key is invalid or restricted. Try a different permission mode."
-        )
-    return client
+    return OpenAI(api_key=api_key)
 
 
-# ------------------------------------------
-# Generate Consulting-Grade AI Analysis
-# ------------------------------------------
 def generate_ai_analysis(
     problem: str,
     domain: str,
     rule_based_summary: str,
-) -> Optional[str]:
+    model: str = "gpt-4.1-mini",
+    temperature: float = 0.2,
+    max_tokens: int = 1400,
+) -> str:
     """
-    Produces a full consulting brief using the upgraded Bivenue Copilot logic.
+    Call OpenAI to generate a consulting-style deep-dive brief.
+
+    Returns a markdown string ready to render with st.markdown().
+    Raises LLMNotConfigured if the API key is missing.
+    Propagates other exceptions to be handled in app.py.
     """
+    client = _get_client()
 
-    client = _build_client()
-
-    user_prompt = (
-        f"Finance domain: {domain}\n"
-        f"Business problem:\n{problem}\n\n"
-        f"Rule-based diagnostic summary:\n{rule_based_summary}\n\n"
-        "Generate the full consulting brief now."
+    # System message: how the AI should behave
+    system_msg = (
+        "You are a senior finance transformation consultant (Big-4 / Gartner style). "
+        "Write concise but high-quality consulting briefs for CFOs and Finance leaders. "
+        "Your tone is practical, structured and non-fluffy. "
+        "Always organize output under clearly numbered headings."
     )
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.25,
-            max_tokens=1600,
-        )
+    # User message: concrete task
+    user_prompt = f"""
+You are helping a CFO diagnose and solve a **{domain}** challenge.
 
-        return response.choices[0].message["content"]
+### Original problem (verbatim from client)
+\"\"\"{problem.strip()}\"\"\"
 
-    except Exception as e:
-        # Catch any token limits, network errors, or permissions errors
-        return f"AI analysis failed: {str(e)}"
+### Rule-based summary from an internal diagnostic engine
+{rule_based_summary.strip()}
+
+### Task
+Write a 1-page consulting brief in markdown with the following structure and headings:
+
+# Consulting Brief: Short, impactful title (max 1 line)
+
+1. Context & Problem Restatement  
+   - Restate the situation in plain language (2–3 bullet points).  
+   - Focus on why this is painful for Finance and the business.
+
+2. Likely Root Causes  
+   - 4–6 bullets grouped around Process, Technology, Data, Organization, Governance.  
+   - Make them specific and realistic for a global finance organization.
+
+3. Quick Wins (0–3 months)  
+   - 4–6 very concrete, execution-ready actions.  
+   - Each bullet should start with a strong verb (e.g., "Standardize...", "Deploy...", "Launch...").
+
+4. Roadmap 3–6 months  
+   - 3–5 bullets describing medium-term initiatives (process, tech, operating model).
+
+5. Roadmap 6–12 months  
+   - 3–5 bullets for more advanced / structural changes.
+
+6. Risks & Dependencies  
+   - 4–6 bullets on execution risks, data/tech dependencies, change management.
+
+7. Success Metrics / KPIs  
+   - 6–8 metrics a CFO would track (cycle time, close quality, automation %, IC breaks, etc.).
+
+Make it specific to the problem and domain, not generic.  
+Avoid repeating the headings inside the bullets (no **Context:** etc inside bullets).  
+Do NOT include any extra sections outside 1–7.
+"""
+
+    response = client.chat.completions.create(
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+
+    # Correct way: access the message via .choices[0].message.content
+    message = response.choices[0].message
+    content: Optional[str] = message.content if message is not None else None
+
+    if not content:
+        raise RuntimeError("LLM returned an empty response.")
+
+    return content.strip()
