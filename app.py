@@ -116,27 +116,26 @@ def render_ai_section(challenge: str, domain: str, recommendations: str) -> None
         ai_error = f"AI error: {e}"
 
     if ai_brief:
-        st.markdown(ai_brief)
+    st.markdown(ai_brief)
 
-        pdf_bytes = create_consulting_brief_pdf(
-            logo_path="engine/bivenue_logo.png",  # <-- your correct path
-            domain=domain,
-            challenge=challenge,
-            rule_based_summary=recommendations,
-            ai_brief=ai_brief,
-            company_name="Client",
-            industry="Finance",
-            revenue=None,
-            employees=None,
-        )
+    pdf_bytes = create_consulting_brief_pdf(
+        logo_path="engine/bivenue_logo.png",  # adjust if your logo lives elsewhere
+        domain=domain,
+        challenge=challenge,
+        rule_based_summary=recommendations,
+        ai_brief=ai_brief,
+        company_name="Client",          # later you can expose as inputs
+        industry="Finance",
+        revenue=None,
+        employees=None,
+    )
 
-        st.download_button(
-            label="📥 Download 1-page consulting brief (PDF)",
-            data=pdf_bytes,
-            file_name="bivenue_finance_brief.pdf",
-            mime="application/pdf",
-        )
-
+    st.download_button(
+        label="📥 Download 1-page consulting brief (PDF)",
+        data=pdf_bytes,
+        file_name="bivenue_finance_brief.pdf",
+        mime="application/pdf",
+    )
     if ai_error:
         st.warning(ai_error)
 
