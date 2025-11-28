@@ -2,19 +2,29 @@
 
 from __future__ import annotations
 
+import os
 from io import BytesIO
 from typing import Optional, List, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
-# Basic page geometry (A4-ish at 150 dpi)
+# ---------- PAGE GEOMETRY ----------
+# A4-ish at 150 dpi
 PAGE_WIDTH = 1654
 PAGE_HEIGHT = 2339
 
-BANNER_HEIGHT = 260
+HEADER_HEIGHT = 260
 MARGIN = 80
 COLUMN_GAP = 40
 
+# Colors
+HEADER_BG = "#003A70"   # dark blue
+HEADER_TEXT = "#FFFFFF"
+TITLE_BLUE = "#003966"
+BENEFIT_GREEN = "#00A96D"
+
+
+# ---------- FONT HELPERS ----------
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     """
@@ -82,6 +92,8 @@ def _draw_paragraph(
     return y
 
 
+# ---------- HEADER (LOGO + COMPANY PROFILE CARD) ----------
+
 def _draw_top_banner(
     img: Image.Image,
     draw: ImageDraw.ImageDraw,
@@ -90,35 +102,37 @@ def _draw_top_banner(
     industry: Optional[str],
 ) -> None:
     """
-    Top dark-blue banner with *only logo on the left* and Company Profile card on the right.
-    No 'Bivenue Copilot' text.
+    Top dark-blue banner with:
+      - ONLY the Bivenue logo on the left
+      - Company Profile card on the right
+    No "Bivenue Copilot" text in the header.
     """
-    banner_color = "#003966"
-   # ----- HEADER (Logo Only) -----
-HEADER_BG = "#003A70"   # dark blue background (same as before)
+    # background bar
+    draw.rectangle([0, 0, PAGE_WIDTH, HEADER_HEIGHT], fill=HEADER_BG)
 
-# Draw the header background bar
-draw.rectangle([0, 0, width, HEADER_HEIGHT], fill=HEADER_BG)
+    # --- Left: logo (if provided) ---
+    if logo_path and os.path.exists(logo_path):
+        try:
+            logo = Image.open(logo_path).convert("RGBA")
+            max_logo_height = 90
+            scale = min(max_logo_height / logo.height, 1.0)
+            new_w = int(logo.width * scale)
+            new_h = int(logo.height * scale)
+            logo = logo.resize((new_w, new_h), Image.LANCZOS)
 
-# Insert the logo on the right side
-if logo:
-    # scale logo to fit inside header
-    max_logo_height = 80
-    scale = max_logo_height / logo.size[1]
-    new_width = int(logo.size[0] * scale)
-    new_height = int(logo.size[1] * scale)
-    resized_logo = logo.resize((new_width, new_height))
+            pad_x = 40
+            logo_x = pad_x
+            logo_y = (HEADER_HEIGHT - new_h) // 2
+            img.paste(logo, (logo_x, logo_y), logo)
+        except Exception:
+            # Fail silently – header will just be text/card
+            pass
 
-    # position logo on the right side with padding
-    logo_x = width - new_width - 40
-    logo_y = (HEADER_HEIGHT - new_height) // 2
-
-    img.paste(resized_logo, (logo_x, logo_y), resized_logo)
-    # --- Right: Company profile card ---
+    # --- Right: Company Profile card ---
     card_width = 520
     card_height = 200
     card_x = PAGE_WIDTH - MARGIN - card_width
-    card_y = BANNER_HEIGHT // 2 - card_height // 2
+    card_y = HEADER_HEIGHT // 2 - card_height // 2
 
     draw.rounded_rectangle(
         [(card_x, card_y), (card_x + card_width, card_y + card_height)],
@@ -133,7 +147,7 @@ if logo:
         (card_x + 24, card_y + 18),
         "Company Profile",
         font=title_font,
-        fill=banner_color,
+        fill=TITLE_BLUE,
     )
 
     y = card_y + 70
@@ -153,6 +167,8 @@ if logo:
         )
 
 
+# ---------- THREE CONSULTING COLUMNS ----------
+
 def _draw_consulting_columns(
     draw: ImageDraw.ImageDraw,
     challenge: str,
@@ -165,16 +181,16 @@ def _draw_consulting_columns(
       1) Mission-critical priority
       2) How Bivenue helped
       3) Outcome & AI deep-dive insights
+
     Returns the y position after this block, so we can draw benefits below.
     """
     heading_font = _load_font(30)
     body_font = _load_font(24)
 
-    top_y = BANNER_HEIGHT + 80
+    top_y = HEADER_HEIGHT + 80
     usable_width = PAGE_WIDTH - 2 * MARGIN
     col_width = (usable_width - 2 * COLUMN_GAP) // 3
 
-    # Column X positions
     col1_x = MARGIN
     col2_x = col1_x + col_width + COLUMN_GAP
     col3_x = col2_x + col_width + COLUMN_GAP
@@ -184,7 +200,7 @@ def _draw_consulting_columns(
         (col1_x, top_y),
         "Mission-critical priority",
         font=heading_font,
-        fill="#003966",
+        fill=TITLE_BLUE,
     )
     y1 = top_y + 50
     mission_text = f"Mission-critical priority: {domain or 'Finance'}"
@@ -195,7 +211,7 @@ def _draw_consulting_columns(
         (col2_x, top_y),
         "How Bivenue helped",
         font=heading_font,
-        fill="#003966",
+        fill=TITLE_BLUE,
     )
     y2 = top_y + 50
     how_text = rule_based_summary or "Summary of recommended focus areas & actions."
@@ -206,7 +222,7 @@ def _draw_consulting_columns(
         (col3_x, top_y),
         "Outcome & AI deep-dive insights",
         font=heading_font,
-        fill="#003966",
+        fill=TITLE_BLUE,
     )
     y3 = top_y + 50
     outcome_text = ai_brief or "AI analysis could not be generated."
@@ -214,6 +230,8 @@ def _draw_consulting_columns(
 
     return max(y1, y2, y3)
 
+
+# ---------- BCG-STYLE BENEFIT STRIP ----------
 
 def _draw_benefits_strip(
     draw: ImageDraw.ImageDraw,
@@ -226,7 +244,6 @@ def _draw_benefits_strip(
     heading_font = _load_font(26)
     body_font = _load_font(22)
 
-    # You can tweak these to your liking
     benefits: List[Tuple[str, str]] = [
         (
             "Leading by example",
@@ -257,30 +274,25 @@ def _draw_benefits_strip(
     box_width = (total_width - box_gap * (len(benefits) - 1)) // len(benefits)
     box_height = 210
 
-    green = "#00a96d"
-
     for i, (title, text) in enumerate(benefits):
         x = strip_left + i * (box_width + box_gap)
         y = top_y
 
-        # Box
         draw.rounded_rectangle(
             [(x, y), (x + box_width, y + box_height)],
             radius=35,
-            outline=green,
+            outline=BENEFIT_GREEN,
             width=3,
             fill="white",
         )
 
-        # Title (green)
         draw.text(
             (x + 18, y + 18),
             title,
             font=heading_font,
-            fill=green,
+            fill=BENEFIT_GREEN,
         )
 
-        # Body text
         body_y = y + 18 + 40
         _draw_paragraph(
             draw,
@@ -292,6 +304,8 @@ def _draw_benefits_strip(
             fill="black",
         )
 
+
+# ---------- PUBLIC ENTRY POINT ----------
 
 def create_consulting_brief_pdf(
     logo_path: Optional[str],
@@ -310,14 +324,14 @@ def create_consulting_brief_pdf(
       - 3 consulting columns
       - BCG-style benefits strip at the bottom
     """
-    # --- Base image ---
+    # Base image
     img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), "white")
     draw = ImageDraw.Draw(img)
 
-    # --- Header banner (logo only + company profile) ---
+    # Header banner (logo only + company profile)
     _draw_top_banner(img, draw, logo_path, company_name, industry)
 
-    # --- Consulting content columns ---
+    # Consulting content columns
     bottom_y = _draw_consulting_columns(
         draw=draw,
         challenge=challenge,
@@ -326,12 +340,12 @@ def create_consulting_brief_pdf(
         ai_brief=ai_brief,
     )
 
-    # --- Benefits strip (BCG-style flow) ---
+    # Benefits strip (BCG-style flow) if there's room
     benefits_top = bottom_y + 80
     if benefits_top + 220 < PAGE_HEIGHT - 80:
         _draw_benefits_strip(draw, benefits_top)
 
-    # --- Export to PDF (via RGB image) ---
+    # Export to PDF
     output = BytesIO()
     img.save(output, format="PDF")
     return output.getvalue()
