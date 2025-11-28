@@ -189,12 +189,16 @@ def render_ai_section(challenge: str, domain: str, recommendations: str) -> None
             )
     except LLMNotConfigured as e:
         ai_error = str(e)
-    except Exception as e:  # catch-all so we can debug in UI
+    except Exception as e:
+        # Show real error to you so we can debug later if needed
         ai_error = f"AI analysis failed: {e}"
 
     if ai_brief:
-        # 3a) Show the AI brief
         st.markdown(ai_brief)
+    elif ai_error:
+        st.warning(ai_error)
+    else:
+        st.info("No AI analysis was generated.")
 
         # 3b) Build a branded 1-pager PDF
         pdf_bytes = create_consulting_brief_pdf(
