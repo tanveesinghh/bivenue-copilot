@@ -192,9 +192,9 @@ def render_ai_section(challenge: str, domain: str, recommendations: str) -> None
     except Exception as e:
         ai_error = f"AI analysis failed: {e}"
 
-    # -------------------------
-    # Correct Indentation Below
-    # -------------------------
+    # --------------------------------
+    # Correct indentation starts here
+    # --------------------------------
     if ai_brief:
         st.markdown(ai_brief)
 
