@@ -6,7 +6,6 @@ from graphviz import Digraph
 from engine.classifier import classify_domain
 from engine.generator import generate_recommendations
 from engine.llm import generate_ai_analysis, LLMNotConfigured
-from engine.pdf_export import create_consulting_brief_pdf
 
 # -------------------------------------------------
 # Streamlit page config
@@ -109,7 +108,7 @@ def render_result(domain: str, recommendations: str, challenge: str) -> None:
 
 
 # -------------------------------------------------
-# Flowchart generator (local, no extra AI)
+# Flowchart generator (local, no extra AI calls)
 # -------------------------------------------------
 def build_flowchart(
     domain: str,
@@ -158,7 +157,9 @@ def build_flowchart(
 
         # Simple keyword detection
         for node_id, label in stages:
-            if label.lower().split("&")[0].strip().lower() in text:
+            # check only the first part before '&' for a loose match
+            keyword = label.lower().split("&")[0].strip()
+            if keyword in text:
                 dot.node(node_id, label)
                 dot.edge(prev, node_id)
                 prev = node_id
@@ -171,7 +172,7 @@ def build_flowchart(
 
 
 # -------------------------------------------------
-# AI section (LLM + PDF + Flowchart)
+# AI section (LLM + Flowchart — PDF removed for now)
 # -------------------------------------------------
 def render_ai_section(challenge: str, domain: str, recommendations: str) -> None:
     st.divider()
@@ -192,46 +193,19 @@ def render_ai_section(challenge: str, domain: str, recommendations: str) -> None
     except Exception as e:
         ai_error = f"AI analysis failed: {e}"
 
-    # --------------------------------
-    # Correct indentation starts here
-    # --------------------------------
+    # 3a) Show the AI brief or the error
     if ai_brief:
         st.markdown(ai_brief)
 
-    elif ai_error:
-        st.warning(ai_error)
-
-    else:
-        st.info("No AI analysis was generated.")
-
-
-        # 3b) Build a branded 1-pager PDF
-        pdf_bytes = create_consulting_brief_pdf(
-            logo_path="engine/bivenue_logo.png",  # your logo path
-            domain=domain,
-            challenge=challenge,
-            rule_based_summary=recommendations,
-            ai_brief=ai_brief,
-            company_name="Client",  # later you can surface inputs
-            industry="Finance",
-            revenue=None,
-            employees=None,
-        )
-
-        st.download_button(
-            label="📥 Download 1-page consulting brief (PDF)",
-            data=pdf_bytes,
-            file_name="bivenue_finance_brief.pdf",
-            mime="application/pdf",
-        )
-
-        # 3c) Auto-generated flowchart linked to the AI brief
+        # 3b) Auto-generated flowchart linked to the AI brief
         st.subheader("4) Visual roadmap (auto-generated flowchart)")
         flow = build_flowchart(domain, challenge, recommendations, ai_brief)
         st.graphviz_chart(flow)
 
     elif ai_error:
         st.warning(ai_error)
+    else:
+        st.info("No AI analysis was generated.")
 
 
 # -------------------------------------------------
