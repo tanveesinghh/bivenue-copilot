@@ -177,8 +177,8 @@ def render_ai_section(challenge: str, domain: str, recommendations: str) -> None
     st.divider()
     st.subheader("3) AI deep-dive analysis (experimental)")
 
-    ai_brief: Optional[str] = None
-    ai_error: Optional[str] = None
+    ai_brief = None
+    ai_error = None
 
     try:
         with st.spinner("Asking the AI copilot for a deeper analysis..."):
@@ -190,15 +190,20 @@ def render_ai_section(challenge: str, domain: str, recommendations: str) -> None
     except LLMNotConfigured as e:
         ai_error = str(e)
     except Exception as e:
-        # Show real error to you so we can debug later if needed
         ai_error = f"AI analysis failed: {e}"
 
+    # -------------------------
+    # Correct Indentation Below
+    # -------------------------
     if ai_brief:
         st.markdown(ai_brief)
+
     elif ai_error:
         st.warning(ai_error)
+
     else:
         st.info("No AI analysis was generated.")
+
 
         # 3b) Build a branded 1-pager PDF
         pdf_bytes = create_consulting_brief_pdf(
