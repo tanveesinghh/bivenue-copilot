@@ -1,237 +1,715 @@
-from typing import Optional
+import os
+import textwrap
+from typing import List, Dict, Any
 
 import streamlit as st
-from graphviz import Digraph
+from dotenv import load_dotenv
 
-from engine.classifier import classify_domain
-from engine.generator import generate_recommendations
-from engine.llm import generate_ai_analysis, LLMNotConfigured
+from openai import OpenAI
+from tavily import TavilyClient
 
-# -------------------------------------------------
-# Streamlit page config
-# -------------------------------------------------
-st.set_page_config(page_title="Bivenue Copilot", layout="wide")
+# -----------------------------
+# 🔐 Load environment variables
+# -----------------------------
+load_dotenv()
 
-# -------------------------------------------------
-# Content Filter / Input Guardrail
-# -------------------------------------------------
-FORBIDDEN_KEYWORDS = [
-    "porn", "porno", "nude", "nudity", "sex", "sexual", "xxx",
-    "escort", "fetish", "adult video", "onlyfans",
-    "terrorist", "terrorism", "bomb", "explosive",
-    "drugs", "cocaine", "heroin", "meth",
-    "kill", "murder", "shoot", "rape",
-    "hack", "hacking", "ddos", "malware",
-]
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 
-NON_FINANCE_TOPICS = [
-    "dating", "relationship", "romantic", "tinder", "hinge",
-    "gaming", "video game", "minecraft", "pubg", "valorant",
-    "movie", "film", "anime", "manga",
-]
+if not OPENAI_API_KEY:
+    st.warning("⚠️ OPENAI_API_KEY is not set. Add it to your environment or .env file.")
+if not TAVILY_API_KEY:
+    st.info("ℹ️ TAVILY_API_KEY not found. Web search will be disabled and answers will be LLM-only.")
+
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+tavily_client = TavilyClient(api_key=TAVILY_API_KEY) if TAVILY_API_KEY else None
 
 
-def validate_challenge_input(text: str) -> Optional[str]:
-    """Return an error message if the input is not allowed, else None."""
-    if not text:
-        return "Please describe your finance transformation challenge first."
+# -----------------------------
+# 🎨 Global Page Config + Theme
+# -----------------------------
+st.set_page_config(
+    page_title="Bivenue – Finance AI Copilot",
+    page_icon="📊",
+    layout="wide",
+)
 
-    lowered = text.lower()
+MIDNIGHT_BLUE_CSS = """
+<style>
+body {
+    background-color: #050814;
+}
+section.main > div {
+    background: linear-gradient(135deg, #050814 0%, #0b1020 40%, #050814 100%);
+}
+header[data-testid="stHeader"] {
+    background: rgba(5, 8, 20, 0.95);
+}
+.block-container {
+    padding-top: 1.5rem;
+}
+h1, h2, h3, h4, h5, h6, label, p, span {
+    color: #f5f7ff !important;
+}
+.sidebar .sidebar-content {
+    background-color: #030512 !important;
+}
+[data-testid="stSidebar"] {
+    background-color: #030512 !important;
+}
+.css-1d391kg, .stTextInput, .stTextArea, .stSelectbox, .stNumberInput {
+    background-color: #080c1a !important;
+    color: #f5f7ff !important;
+}
+.stTextInput input, .stTextArea textarea {
+    background-color: #080c1a !important;
+    color: #f5f7ff !important;
+}
+.biv-card {
+    border-radius: 16px;
+    padding: 1.2rem 1.4rem;
+    background: radial-gradient(circle at top left, #151c3b, #050814);
+    border: 1px solid rgba(120, 159, 255, 0.25);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
+}
+.biv-chip {
+    display: inline-block;
+    padding: 0.25rem 0.7rem;
+    border-radius: 999px;
+    background: rgba(75, 138, 255, 0.18);
+    color: #b9c5ff;
+    font-size: 0.72rem;
+    margin-right: 0.25rem;
+    margin-bottom: 0.25rem;
+}
+.biv-tag {
+    font-size: 0.75rem;
+    color: #b8c2ff;
+}
+.biv-source {
+    font-size: 0.82rem;
+    margin-bottom: 0.5rem;
+}
+.biv-source a {
+    color: #8fb2ff !important;
+    text-decoration: none;
+}
+.biv-source a:hover {
+    text-decoration: underline;
+}
+.biv-subtle {
+    color: #9ca6e8 !important;
+    font-size: 0.8rem;
+}
+</style>
+"""
 
-    # Hard block NSFW / harmful content
-    for word in FORBIDDEN_KEYWORDS:
-        if word in lowered:
-            return (
-                "This copilot is restricted to **finance / business transformation** "
-                "use cases only. Content with sexual, violent, criminal or harmful "
-                "intent is not allowed."
-            )
+st.markdown(MIDNIGHT_BLUE_CSS, unsafe_allow_html=True)
 
-    # Gently push away non-finance topics
-    for word in NON_FINANCE_TOPICS:
-        if word in lowered:
-            return (
-                "It looks like your question is not about **finance transformation**. "
-                "Please describe a challenge related to R2R, P2P, O2C, FP&A, "
-                "intercompany, consolidation, close, or process/tech/people change."
-            )
 
-    # Overly long description
-    if len(text) > 4000:
-        return (
-            "Your description is a bit too long. Please summarise the challenge "
-            "in under 4,000 characters."
+# -----------------------------
+# 🧠 Helper: Call OpenAI Chat
+# -----------------------------
+def ask_gpt(
+    messages: List[Dict[str, str]],
+    model: str = "gpt-4.1-mini",
+    temperature: float = 0.35,
+    max_tokens: int = 1000,
+) -> str:
+    if not client:
+        return "⚠️ OpenAI client not initialized. Please set OPENAI_API_KEY."
+
+    completion = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    return completion.choices[0].message.content
+
+
+# -----------------------------
+# 🌐 Perplexity-style Search
+# -----------------------------
+def tavily_search(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+    if not tavily_client:
+        return []
+
+    result = tavily_client.search(
+        query=query,
+        max_results=max_results,
+        search_depth="advanced",
+        include_answers=False,
+        include_images=False,
+        include_raw_content=False,
+    )
+    return result.get("results", [])
+
+
+def build_citation_context(results: List[Dict[str, Any]]) -> str:
+    context_parts = []
+    for i, r in enumerate(results):
+        idx = i + 1
+        title = r.get("title", f"Source {idx}")
+        url = r.get("url", "")
+        content = r.get("content", "")
+        snippet = textwrap.shorten(content, width=500, placeholder="…")
+        context_parts.append(
+            f"[{idx}] {title}\nURL: {url}\nSummary: {snippet}\n"
+        )
+    return "\n\n".join(context_parts)
+
+
+def answer_with_citations(query: str) -> Dict[str, Any]:
+    results = tavily_search(query, max_results=6) if tavily_client else []
+    context = build_citation_context(results) if results else "No external search results were available."
+
+    system_msg = {
+        "role": "system",
+        "content": (
+            "You are Bivenue, a research-focused AI that answers concisely, "
+            "with clear structure, and uses bracketed citations like [1], [2] "
+            "that reference the provided sources. If you are unsure, say so."
+        ),
+    }
+
+    user_msg = {
+        "role": "user",
+        "content": (
+            f"Question:\n{query}\n\n"
+            f"Use the following search results to answer. When you use a fact, "
+            f"cite the source index like [1], [2]. If no results are available, "
+            f"answer based on your general knowledge and clearly say that "
+            f"no web sources were used.\n\n"
+            f"Search results:\n{context}"
+        ),
+    }
+
+    answer = ask_gpt([system_msg, user_msg], model="gpt-4.1-mini", max_tokens=1200)
+
+    return {"answer": answer, "sources": results}
+
+
+# -----------------------------
+# 💼 Finance Transformation AI
+# -----------------------------
+def finance_transform_answer(task_type: str, prompt: str) -> str:
+    system = {
+        "role": "system",
+        "content": (
+            "You are a senior Finance Transformation & Automation Director. "
+            "You design R2R, P2P, O2C processes, TOMs, business cases, and "
+            "automation opportunities. Your answers must be concise, structured, "
+            "and practical, suitable for real-world execution."
+        ),
+    }
+
+    user = {
+        "role": "user",
+        "content": (
+            f"Task type: {task_type}\n\n"
+            f"User context / input:\n{prompt}\n\n"
+            "Deliver a structured answer with headers and bullet points. "
+            "Whenever relevant, include:\n"
+            "- Current state\n"
+            "- Pain points\n"
+            "- Future state design\n"
+            "- KPIs\n"
+            "- Automation opportunities\n"
+            "- Quick wins vs long-term initiatives\n"
+        ),
+    }
+
+    return ask_gpt([system, user], model="gpt-4.1", max_tokens=1600)
+
+
+# -----------------------------
+# 🔧 SOP Builder
+# -----------------------------
+def build_sop(process_name: str, process_context: str, steps_raw: str) -> str:
+    system = {
+        "role": "system",
+        "content": (
+            "You are a Finance Process Excellence Lead. You create very clear, "
+            "practical SOPs for finance processes (R2R, P2P, O2C, Tax, etc.)."
+        ),
+    }
+
+    user = {
+        "role": "user",
+        "content": textwrap.dedent(
+            f"""
+            Create a detailed Standard Operating Procedure (SOP).
+
+            Process name: {process_name}
+
+            Business context:
+            {process_context}
+
+            High-level steps provided by the user:
+            {steps_raw}
+
+            SOP output format:
+
+            1. Purpose
+            2. Scope
+            3. Definitions / Key Terms
+            4. Roles & Responsibilities (RACI style)
+            5. Detailed Step-by-Step Procedure
+               - Step number
+               - Description
+               - Responsible role
+               - Systems / tools
+               - Inputs & outputs
+            6. Controls & Risk Points
+            7. KPIs & SLAs
+            8. Automation Opportunities
+            9. Appendix (if needed)
+
+            Make it concise but execution-ready.
+            """
+        ),
+    }
+
+    return ask_gpt([system, user], model="gpt-4.1", max_tokens=2000)
+
+
+# -----------------------------
+# ⚙️ Automation & Time Study
+# -----------------------------
+def automation_analysis(process_desc: str, metrics: Dict[str, Any]) -> str:
+    system = {
+        "role": "system",
+        "content": (
+            "You are a Lean Six Sigma Black Belt & Automation Director. "
+            "You identify 8 wastes, RPA/AI opportunities, and build quick-win roadmaps."
+        ),
+    }
+
+    metrics_text = "\n".join(
+        [f"- {k}: {v}" for k, v in metrics.items() if v not in (None, "", 0)]
+    )
+
+    user = {
+        "role": "user",
+        "content": textwrap.dedent(
+            f"""
+            Analyze the following finance/shared-services process for automation potential.
+
+            Process description:
+            {process_desc}
+
+            Quantitative metrics (if any):
+            {metrics_text}
+
+            Provide:
+            1. Summary of current state
+            2. Key pain points & 8 wastes (TIMWOODS)
+            3. RPA / AI / Workflow automation opportunities
+            4. Estimated impact (FTE, cycle time, quality)
+            5. Quick wins (0–3 months)
+            6. Medium-term initiatives (3–9 months)
+            7. Long-term strategic moves (9–24 months)
+            8. Risks / dependencies
+            """
+        ),
+    }
+
+    return ask_gpt([system, user], model="gpt-4.1", max_tokens=1600)
+
+
+# -----------------------------
+# 🧾 SAP Copilot
+# -----------------------------
+def sap_copilot_answer(question: str, module_hint: str) -> str:
+    system = {
+        "role": "system",
+        "content": (
+            "You are an expert SAP S/4HANA FI/CO Solution Architect. "
+            "You explain SAP finance processes (P2P, O2C, R2R, AA, Tax, etc.) "
+            "in simple language. You mention key T-codes, tables, and typical "
+            "root causes, but DO NOT invent configuration the user did not ask for. "
+            "Be practical and focused on finance operations."
+        ),
+    }
+
+    user = {
+        "role": "user",
+        "content": (
+            f"Module focus (hint): {module_hint}\n\n"
+            f"Question:\n{question}\n\n"
+            "Answer structure:\n"
+            "1. Short summary\n"
+            "2. Likely root causes / explanation\n"
+            "3. How to investigate (T-codes / logs)\n"
+            "4. Example document flow (if relevant)\n"
+            "5. Tips / best practices\n"
+        ),
+    }
+
+    return ask_gpt([system, user], model="gpt-4.1", max_tokens=1500)
+
+
+# -----------------------------
+# 📊 Deck / Executive Summary
+# -----------------------------
+def build_exec_deck_outline(deck_type: str, context: str) -> str:
+    system = {
+        "role": "system",
+        "content": (
+            "You are a McKinsey-style consultant creating slide outlines for "
+            "Finance Transformation decks. You output slide-by-slide content."
+        ),
+    }
+
+    user = {
+        "role": "user",
+        "content": textwrap.dedent(
+            f"""
+            Create a slide-by-slide outline for a {deck_type}.
+
+            Business context:
+            {context}
+
+            Output format:
+
+            Slide 1: Title & Subtitle
+            - Bullet 1
+            - Bullet 2
+
+            Slide 2: ...
+            ...
+            Limit to 12–15 slides. Make them executive-ready.
+            """
+        ),
+    }
+
+    return ask_gpt([system, user], model="gpt-4.1-mini", max_tokens=1800)
+
+
+# -----------------------------
+# 🧱 UI Components
+# -----------------------------
+def render_sources(sources: List[Dict[str, Any]]):
+    if not sources:
+        st.caption("No external sources were used (LLM-only answer).")
+        return
+
+    st.markdown("#### Sources")
+    for i, src in enumerate(sources):
+        idx = i + 1
+        title = src.get("title", f"Source {idx}")
+        url = src.get("url", "")
+        st.markdown(
+            f"""
+            <div class="biv-source">
+            <span class="biv-chip">[{idx}]</span>
+            <strong>{title}</strong><br/>
+            <a href="{url}" target="_blank">{url}</a>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-    return None
+
+def render_answer_box(content: str, title: str = "Answer"):
+    st.markdown(
+        f"""
+        <div class="biv-card">
+            <div class="biv-tag">{title}</div>
+            <div style="margin-top:0.5rem;">
+                {content.replace("\n", "<br/>")}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
-# -------------------------------------------------
-# UI helpers
-# -------------------------------------------------
-def render_header() -> None:
-    st.title("🧠 Bivenue Copilot")
-    st.caption("Your AI Advisor for Finance Transformation.")
+# -----------------------------
+# 🚀 MAIN APP LAYOUT
+# -----------------------------
+def main():
+    # Sidebar
+    st.sidebar.markdown("### 📊 Bivenue – Finance AI Copilot")
+    st.sidebar.caption("Hybrid Perplexity + Finance Transformation + SAP Copilot")
+
+    mode = st.sidebar.radio(
+        "Choose mode",
+        [
+            "🔍 Research (Perplexity-style)",
+            "💼 Finance Transformation AI",
+            "🧾 SOP Builder",
+            "🤖 Automation & Time Study",
+            "🧠 SAP Copilot",
+            "📈 Deck Generator (outline)",
+        ],
+    )
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(
+        "<span class='biv-subtle'>Theme: Midnight Blue • Built for Finance & SAP</span>",
+        unsafe_allow_html=True,
+    )
+
+    # Header
+    col1, col2 = st.columns([0.8, 0.2])
+    with col1:
+        st.markdown("## 📊 Bivenue – Hybrid Finance AI Copilot")
+        st.markdown(
+            "<span class='biv-subtle'>Ask anything, then go deeper into Finance, Automation, and SAP.</span>",
+            unsafe_allow_html=True,
+        )
+    with col2:
+        st.markdown(
+            "<div style='text-align:right;'><span class='biv-chip'>v2 • Beta</span></div>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("")
+
+    # Mode Handlers
+    if mode == "🔍 Research (Perplexity-style)":
+        research_mode_ui()
+    elif mode == "💼 Finance Transformation AI":
+        finance_mode_ui()
+    elif mode == "🧾 SOP Builder":
+        sop_mode_ui()
+    elif mode == "🤖 Automation & Time Study":
+        automation_mode_ui()
+    elif mode == "🧠 SAP Copilot":
+        sap_mode_ui()
+    elif mode == "📈 Deck Generator (outline)":
+        deck_mode_ui()
 
 
-def render_input() -> str:
-    st.subheader("Describe your finance transformation challenge")
-    challenge = st.text_area(
-        label="Describe your finance transformation challenge",
+# -----------------------------
+# 🔍 Research Mode UI
+# -----------------------------
+def research_mode_ui():
+    st.markdown("### 🔍 Research Mode (Perplexity-style)")
+    query = st.text_input("Ask a question (general or finance-related):", placeholder="e.g. What is Global Minimum Tax and how does it impact multinationals?")
+
+    col_suggest1, col_suggest2, col_suggest3 = st.columns(3)
+    with col_suggest1:
+        if st.button("Impact of AI on R2R"):
+            query_default = "How is AI changing Record to Report (R2R) processes in large enterprises?"
+            st.session_state["research_query"] = query_default
+            query = query_default
+    with col_suggest2:
+        if st.button("Order-to-Cash best practices"):
+            query_default = "What are best practices to optimize the Order-to-Cash cycle in a global company?"
+            st.session_state["research_query"] = query_default
+            query = query_default
+    with col_suggest3:
+        if st.button("Working capital levers"):
+            query_default = "Key working capital levers in P2P, O2C and Inventory management."
+            st.session_state["research_query"] = query_default
+            query = query_default
+
+    if query:
+        with st.spinner("Researching across the web and building your answer..."):
+            result = answer_with_citations(query)
+            answer = result["answer"]
+            sources = result["sources"]
+
+        render_answer_box(answer, title="Research Answer")
+        render_sources(sources)
+
+
+# -----------------------------
+# 💼 Finance Mode UI
+# -----------------------------
+def finance_mode_ui():
+    st.markdown("### 💼 Finance Transformation AI")
+
+    task_type = st.selectbox(
+        "What do you want to design / analyze?",
+        [
+            "R2R transformation",
+            "P2P transformation",
+            "O2C transformation",
+            "Shared service setup",
+            "Automation roadmap",
+            "Close optimization",
+            "Controllership / audit",
+            "Custom transformation topic",
+        ],
+    )
+
+    prompt = st.text_area(
+        "Describe your current situation, challenges, and objectives:",
+        height=220,
         placeholder=(
-            "e.g., 'Intercompany mismatches causing consolidation delays across entities "
-            "using SAP and BlackLine; lots of manual Excel reconciliations; unclear "
-            "ownership between GBS and local controllers.'"
+            "Example: We are a global retail company with fragmented R2R processes across 5 regions. "
+            "Month-end close takes 10 days, there are many manual journal entries, "
+            "and audit adjustments are frequent. I want a target state design with quick wins."
         ),
-        height=160,
-        label_visibility="collapsed",
-    )
-    return challenge
-
-
-def render_result(domain: str, recommendations: str, challenge: str) -> None:
-    st.success("Rule-based diagnostic complete.")
-
-    st.subheader("1) Detected finance domain")
-    st.write(f"**Domain:** {domain}")
-
-    with st.expander("See original problem statement"):
-        st.write(challenge)
-
-    st.subheader("2) Recommended focus areas & actions")
-    st.markdown(recommendations)
-
-    st.info(
-        "This is a rule-based v1 engine. Future versions will use your playbooks, "
-        "historical data, and LLMs to refine the diagnosis and roadmap."
     )
 
-
-# -------------------------------------------------
-# Flowchart generator (local, no extra AI calls)
-# -------------------------------------------------
-def build_flowchart(
-    domain: str,
-    challenge: str,
-    recommendations: str,
-    ai_brief: Optional[str] = None,
-) -> Digraph:
-    """
-    Build a Graphviz flowchart that reflects the journey from:
-    Challenge → Domain → Rule-based focus → AI sections → Outcome.
-    """
-    dot = Digraph()
-    dot.attr(rankdir="LR", bgcolor="white")
-    dot.attr(
-        "node",
-        shape="rectangle",
-        style="rounded,filled",
-        fillcolor="#e3f2fd",
-        color="#1565c0",
-        fontname="Helvetica",
-    )
-
-    # Core nodes
-    dot.node("start", "Finance challenge")
-    dot.node("domain", f"Domain:\n{domain}")
-    dot.node("rule", "Rule-based\nfocus areas")
-
-    dot.edge("start", "domain")
-    dot.edge("domain", "rule")
-
-    prev = "rule"
-
-    # If we have an AI brief, try to detect sections and build steps
-    if ai_brief:
-        text = ai_brief.lower()
-
-        stages = [
-            ("context", "Context & Problem"),
-            ("root", "Likely Root Causes"),
-            ("qw", "Quick Wins (0–3 months)"),
-            ("r36", "Roadmap 3–6 months"),
-            ("r612", "Roadmap 6–12 months"),
-            ("risks", "Risks & Dependencies"),
-            ("kpi", "Success Metrics / KPIs"),
-        ]
-
-        # Simple keyword detection
-        for node_id, label in stages:
-            # check only the first part before '&' for a loose match
-            keyword = label.lower().split("&")[0].strip()
-            if keyword in text:
-                dot.node(node_id, label)
-                dot.edge(prev, node_id)
-                prev = node_id
-
-    # Final outcome node
-    dot.node("outcome", "Improved finance\noperations & governance")
-    dot.edge(prev, "outcome")
-
-    return dot
-
-
-# -------------------------------------------------
-# AI section (LLM + Flowchart — PDF removed for now)
-# -------------------------------------------------
-def render_ai_section(challenge: str, domain: str, recommendations: str) -> None:
-    st.divider()
-    st.subheader("3) AI deep-dive analysis (experimental)")
-
-    ai_brief = None
-    ai_error = None
-
-    try:
-        with st.spinner("Asking the AI copilot for a deeper analysis..."):
-            ai_brief = generate_ai_analysis(
-                problem=challenge,
-                domain=domain,
-                rule_based_summary=recommendations,
-            )
-    except LLMNotConfigured as e:
-        ai_error = str(e)
-    except Exception as e:
-        ai_error = f"AI analysis failed: {e}"
-
-    # 3a) Show the AI brief or the error
-    if ai_brief:
-        st.markdown(ai_brief)
-
-        # 3b) Auto-generated flowchart linked to the AI brief
-        st.subheader("4) Visual roadmap (auto-generated flowchart)")
-        flow = build_flowchart(domain, challenge, recommendations, ai_brief)
-        st.graphviz_chart(flow)
-
-    elif ai_error:
-        st.warning(ai_error)
-    else:
-        st.info("No AI analysis was generated.")
-
-
-# -------------------------------------------------
-# Main app
-# -------------------------------------------------
-def main() -> None:
-    render_header()
-    challenge = render_input()
-
-    if st.button("Diagnose", type="primary"):
-        # 1) Content guardrail
-        error_message = validate_challenge_input(challenge.strip())
-        if error_message:
-            st.warning(error_message)
+    if st.button("Generate Transformation Plan"):
+        if not prompt.strip():
+            st.warning("Please describe your situation so I can generate something concrete.")
             return
 
-        # 2) Rule-based engine
-        with st.spinner("Running rule-based diagnostic..."):
-            domain = classify_domain(challenge)
-            recommendations = generate_recommendations(domain, challenge)
+        with st.spinner("Designing your finance transformation plan..."):
+            answer = finance_transform_answer(task_type, prompt)
 
-        render_result(domain, recommendations, challenge)
-
-        # 3) AI & flowchart section
-        render_ai_section(challenge, domain, recommendations)
+        render_answer_box(answer, title="Transformation Recommendation")
 
 
+# -----------------------------
+# 🧾 SOP Builder UI
+# -----------------------------
+def sop_mode_ui():
+    st.markdown("### 🧾 SOP Builder")
+
+    process_name = st.text_input("Process name:", placeholder="e.g. Vendor Invoice Processing (P2P)")
+    process_context = st.text_area(
+        "Business context:",
+        height=160,
+        placeholder=(
+            "Describe the business, region, systems (e.g., SAP S/4HANA, Coupa), "
+            "volumes, pain points, and any specific compliance requirements."
+        ),
+    )
+    steps_raw = st.text_area(
+        "High-level steps (one per line):",
+        height=200,
+        placeholder="1. Receive invoice\n2. Perform 3-way match\n3. Post invoice in SAP\n4. Handle exceptions\n5. Run payment proposal\n6. Execute payment run",
+    )
+
+    if st.button("Generate SOP"):
+        if not process_name.strip() or not steps_raw.strip():
+            st.warning("Please provide at least a process name and some steps.")
+            return
+
+        with st.spinner("Building an execution-ready SOP..."):
+            sop_text = build_sop(process_name, process_context, steps_raw)
+
+        render_answer_box(sop_text, title=f"SOP – {process_name}")
+
+
+# -----------------------------
+# 🤖 Automation & Time Study UI
+# -----------------------------
+def automation_mode_ui():
+    st.markdown("### 🤖 Automation & Time Study")
+
+    process_desc = st.text_area(
+        "Describe the process:",
+        height=200,
+        placeholder=(
+            "Example: AP invoice processing for EMEA region. 15 FTE, 12k invoices/month, "
+            "manual 3-way match for most invoices, multiple approvals, frequent exceptions..."
+        ),
+    )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        fte = st.number_input("Approx. FTE", min_value=0.0, step=0.5)
+    with col2:
+        volume = st.number_input("Volume/month (transactions)", min_value=0, step=100)
+    with col3:
+        aht = st.number_input("Avg. handling time (minutes/transaction)", min_value=0.0, step=0.5)
+
+    metrics = {
+        "FTE": fte,
+        "Volume per month": volume,
+        "AHT (minutes/transaction)": aht,
+    }
+
+    if st.button("Analyze Automation Potential"):
+        if not process_desc.strip():
+            st.warning("Please describe the process so I can analyze it.")
+            return
+
+        with st.spinner("Analyzing wastes, automation levers, and impact..."):
+            analysis_text = automation_analysis(process_desc, metrics)
+
+        render_answer_box(analysis_text, title="Automation & Lean Analysis")
+
+
+# -----------------------------
+# 🧠 SAP Copilot UI
+# -----------------------------
+def sap_mode_ui():
+    st.markdown("### 🧠 SAP Copilot – Finance")
+
+    module_hint = st.selectbox(
+        "Which area best matches your question?",
+        [
+            "General Finance / FI",
+            "Record to Report (R2R)",
+            "Order to Cash (O2C)",
+            "Procure to Pay (P2P)",
+            "Asset Accounting (AA)",
+            "Controlling (CO)",
+            "Tax / Withholding",
+            "Other / Not sure",
+        ],
+    )
+
+    question = st.text_area(
+        "Ask your SAP finance question:",
+        height=200,
+        placeholder=(
+            "Example: GR/IR is not clearing after MIGO and MIRO in S/4HANA. "
+            "What could be the reasons and how do I troubleshoot?"
+        ),
+    )
+
+    if st.button("Ask SAP Copilot"):
+        if not question.strip():
+            st.warning("Please type your SAP question.")
+            return
+
+        with st.spinner("Thinking like an SAP Solution Architect..."):
+            answer = sap_copilot_answer(question, module_hint)
+
+        render_answer_box(answer, title="SAP Copilot Answer")
+
+
+# -----------------------------
+# 📈 Deck Generator UI
+# -----------------------------
+def deck_mode_ui():
+    st.markdown("### 📈 Deck Generator (Outline Only)")
+
+    deck_type = st.selectbox(
+        "Deck type:",
+        [
+            "Finance Transformation Proposal",
+            "R2R Optimization Storyline",
+            "P2P Automation Business Case",
+            "O2C Cash Acceleration Story",
+            "Shared Services Setup Proposal",
+            "Close Acceleration & Quality Improvement",
+        ],
+    )
+
+    context = st.text_area(
+        "Business context / notes for the deck:",
+        height=220,
+        placeholder=(
+            "Describe the company, current problems, what leadership wants, and "
+            "any numbers (savings, FTE, days to close, etc.) you want to highlight."
+        ),
+    )
+
+    if st.button("Generate Deck Outline"):
+        if not context.strip():
+            st.warning("Please provide some context so the deck is relevant.")
+            return
+
+        with st.spinner("Designing a slide-by-slide storyline..."):
+            outline = build_exec_deck_outline(deck_type, context)
+
+        render_answer_box(outline, title=f"Deck Outline – {deck_type}")
+
+
+# -----------------------------
+# 🏁 Run app
+# -----------------------------
 if __name__ == "__main__":
     main()
