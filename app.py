@@ -100,6 +100,7 @@ h1, h2, h3, h4 {
     background-color: transparent !important;
 }
 
+
 /* Primary buttons */
 .stButton > button {
     border-radius: 999px;
@@ -482,37 +483,40 @@ def main():
 def research_ui():
     st.subheader("Research Mode")
 
-    # Centered Perplexity-style search bar
+    # --- Perplexity-style centered search bar (single input) ---
     st.markdown(
-        """
-        <div class='biv-search-wrapper'>
-            <div class='biv-search-inner'>
-        """,
+        "<div class='biv-search-wrapper'><div class='biv-search-inner'>",
         unsafe_allow_html=True,
     )
 
     query = st.text_input(
-        "",
-        placeholder="Ask anything… Type your finance, automation, or SAP question."
+        label="",
+        placeholder="Ask anything. Type your finance, automation, or SAP question.",
+        label_visibility="collapsed",       # 👈 hides the label so no extra grey bar
+        key="research_query",
     )
 
     st.markdown("</div></div>", unsafe_allow_html=True)
 
-    # Search button centered
+    # --- Centered Search button only ---
     col = st.columns([3, 1, 3])[1]
-    with col:
-        if st.button("Search"):
-            if not query.strip():
-                st.warning("Please enter a question.")
-                return
-            with st.spinner("Researching…"):
-                res = answer_with_citations(query)
+    run = col.button("Search")
 
-            render_answer(res["answer"], "Research Answer")
-            render_sources(res["sources"])
+    if not run:
+        return
 
+    if not query.strip():
+        st.warning("Please enter a question.")
+        return
 
+    with st.spinner("Researching…"):
+        res = answer_with_citations(query)
 
+    # --- Full-width, nicely centered answer card ---
+    st.markdown("<div style='max-width: 720px; margin: 1.5rem auto;'>", unsafe_allow_html=True)
+    render_answer(res["answer"], "Research Answer")
+    render_sources(res["sources"])
+    st.markdown("</div>", unsafe_allow_html=True)
 def finance_ui():
     st.subheader("Finance Transformation")
 
