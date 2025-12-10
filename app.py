@@ -30,64 +30,87 @@ tavily_client = TavilyClient(api_key=TAVILY_API_KEY) if TAVILY_API_KEY else None
 # -----------------------------
 st.set_page_config(
     page_title="Bivenue – Finance AI Copilot",
-    page_icon="📊",
+    page_icon=" ",
     layout="wide",
 )
 
 MIDNIGHT_BLUE_CSS = """
 <style>
-body {
-    background-color: #050814;
+/* Force full dark background */
+.stApp {
+    background-color: #050814 !important;
 }
+
+/* Main content */
 section.main > div {
-    background: linear-gradient(135deg, #050814 0%, #0b1020 40%, #050814 100%);
+    background: #050814 !important;
 }
-header[data-testid="stHeader"] {
-    background: rgba(5, 8, 20, 0.95);
-}
+
+/* Remove any light overlay at top */
 .block-container {
     padding-top: 1.5rem;
+    background-color: #050814 !important;
 }
-h1, h2, h3, h4, h5, h6, label, p, span {
+
+/* Header bar */
+header[data-testid="stHeader"] {
+    background: #050814 !important;
+    border-bottom: 1px solid rgba(120, 159, 255, 0.25);
+}
+
+/* Global text */
+h1, h2, h3, h4, h5, h6, label, p, span, li {
     color: #f5f7ff !important;
 }
-.sidebar .sidebar-content {
-    background-color: #030512 !important;
-}
+
+/* Sidebar */
 [data-testid="stSidebar"] {
     background-color: #030512 !important;
 }
-.css-1d391kg, .stTextInput, .stTextArea, .stSelectbox, .stNumberInput {
+
+/* Inputs */
+.stTextInput, .stTextArea, .stSelectbox, .stNumberInput {
     background-color: #080c1a !important;
-    color: #f5f7ff !important;
 }
 .stTextInput input, .stTextArea textarea {
     background-color: #080c1a !important;
     color: #f5f7ff !important;
 }
+
+/* Answer card */
 .biv-card {
     border-radius: 16px;
     padding: 1.2rem 1.4rem;
-    background: radial-gradient(circle at top left, #151c3b, #050814);
-    border: 1px solid rgba(120, 159, 255, 0.25);
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
+    background: #080c1a;
+    border: 1px solid rgba(120, 159, 255, 0.35);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.7);
 }
+
+/* Chips & subtle text */
 .biv-chip {
     display: inline-block;
     padding: 0.25rem 0.7rem;
     border-radius: 999px;
-    background: rgba(75, 138, 255, 0.18);
-    color: #b9c5ff;
+    background: rgba(75, 138, 255, 0.25);
+    color: #e0e6ff;
     font-size: 0.72rem;
     margin-right: 0.25rem;
     margin-bottom: 0.25rem;
 }
 .biv-tag {
-    font-size: 0.75rem;
+    font-size: 0.78rem;
     color: #b8c2ff;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
 }
+.biv-subtle {
+    color: #9ca6e8 !important;
+    font-size: 0.8rem;
+}
+
+/* Sources */
 .biv-source {
-    font-size: 0.82rem;
+    font-size: 0.85rem;
     margin-bottom: 0.5rem;
 }
 .biv-source a {
@@ -97,12 +120,9 @@ h1, h2, h3, h4, h5, h6, label, p, span {
 .biv-source a:hover {
     text-decoration: underline;
 }
-.biv-subtle {
-    color: #9ca6e8 !important;
-    font-size: 0.8rem;
-}
 </style>
 """
+
 
 st.markdown(MIDNIGHT_BLUE_CSS, unsafe_allow_html=True)
 
@@ -437,12 +457,12 @@ def main():
     mode = st.sidebar.radio(
         "Choose mode",
         [
-            "🔍 Research (Perplexity-style)",
-            "💼 Finance Transformation AI",
-            "🧾 SOP Builder",
-            "🤖 Automation & Time Study",
-            "🧠 SAP Copilot",
-            "📈 Deck Generator (outline)",
+            " Research ",
+            " Finance Transformation AI",
+            " SOP Builder",
+            " Automation & Time Study",
+            " SAP Copilot",
+            " Deck Generator ",
         ],
     )
 
@@ -469,17 +489,17 @@ def main():
     st.markdown("")
 
     # Mode Handlers
-    if mode == "🔍 Research (Perplexity-style)":
+    if mode == " Research ":
         research_mode_ui()
-    elif mode == "💼 Finance Transformation AI":
+    elif mode == " Finance Transformation AI":
         finance_mode_ui()
-    elif mode == "🧾 SOP Builder":
+    elif mode == " SOP Builder":
         sop_mode_ui()
-    elif mode == "🤖 Automation & Time Study":
+    elif mode == " Automation & Time Study":
         automation_mode_ui()
-    elif mode == "🧠 SAP Copilot":
+    elif mode == " SAP Copilot":
         sap_mode_ui()
-    elif mode == "📈 Deck Generator (outline)":
+    elif mode == " Deck Generator ":
         deck_mode_ui()
 
 
@@ -487,7 +507,7 @@ def main():
 # 🔍 Research Mode UI
 # -----------------------------
 def research_mode_ui():
-    st.markdown("### 🔍 Research Mode (Perplexity-style)")
+    st.markdown("###  Research Mode ")
     query = st.text_input("Ask a question (general or finance-related):", placeholder="e.g. What is Global Minimum Tax and how does it impact multinationals?")
 
     col_suggest1, col_suggest2, col_suggest3 = st.columns(3)
@@ -521,7 +541,7 @@ def research_mode_ui():
 # 💼 Finance Mode UI
 # -----------------------------
 def finance_mode_ui():
-    st.markdown("### 💼 Finance Transformation AI")
+    st.markdown("### Finance Transformation AI")
 
     task_type = st.selectbox(
         "What do you want to design / analyze?",
@@ -562,7 +582,7 @@ def finance_mode_ui():
 # 🧾 SOP Builder UI
 # -----------------------------
 def sop_mode_ui():
-    st.markdown("### 🧾 SOP Builder")
+    st.markdown("###  SOP Builder")
 
     process_name = st.text_input("Process name:", placeholder="e.g. Vendor Invoice Processing (P2P)")
     process_context = st.text_area(
@@ -634,7 +654,7 @@ def automation_mode_ui():
 # 🧠 SAP Copilot UI
 # -----------------------------
 def sap_mode_ui():
-    st.markdown("### 🧠 SAP Copilot – Finance")
+    st.markdown("###  SAP Copilot – Finance")
 
     module_hint = st.selectbox(
         "Which area best matches your question?",
@@ -674,7 +694,7 @@ def sap_mode_ui():
 # 📈 Deck Generator UI
 # -----------------------------
 def deck_mode_ui():
-    st.markdown("### 📈 Deck Generator (Outline Only)")
+    st.markdown("###  Deck Generator ")
 
     deck_type = st.selectbox(
         "Deck type:",
