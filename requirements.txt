@@ -4,3 +4,6 @@ reportlab
 openai
 Pillow
 graphviz
+openai>=1.6.0
+tavily-python
+python-dotenv
