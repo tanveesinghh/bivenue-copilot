@@ -25,12 +25,6 @@ st.set_page_config(
     page_icon="📊",
     layout="wide",
 )
-# -----------------------------
-# 💾 Session state – chat history
-# -----------------------------
-if "history" not in st.session_state:
-    # each item: {"mode": "Research", "question": str, "answer": str, "sources": [...]}
-    st.session_state["history"] = []
 
 # -----------------------------
 # 🎨 Global Styling (Perplexity-inspired)
@@ -66,15 +60,17 @@ h1, h2, h3, h4 {
 /* Centered title + subtitle */
 .biv-header-title {
     text-align: center;
-    font-size: 2.2rem;
+    font-size: 2.0rem;
     font-weight: 600;
-    margin-bottom: 0.25rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.1rem;
 }
 .biv-header-subtitle {
     text-align: center;
     color: #6b7280;
     font-size: 0.95rem;
-    margin-bottom: 1.5rem;
+    margin-top: 0rem;
+    margin-bottom: 1.0rem;
 }
 .biv-divider {
     border: 0;
@@ -105,7 +101,6 @@ h1, h2, h3, h4 {
 .biv-search-inner div[data-baseweb="input"] {
     background-color: transparent !important;
 }
-
 
 /* Primary buttons */
 .stButton > button {
@@ -154,6 +149,13 @@ h1, h2, h3, h4 {
 """
 
 st.markdown(PAGE_CSS, unsafe_allow_html=True)
+
+# -----------------------------
+# 💾 Session state – chat history
+# -----------------------------
+if "history" not in st.session_state:
+    # each item: {"mode": "Research", "question": str, "answer": str, "sources": [...]}
+    st.session_state["history"] = []
 
 # -----------------------------
 # 🧠 OpenAI helper
@@ -435,58 +437,90 @@ def render_sources(sources: List[Dict[str, Any]]):
 
 
 # -----------------------------
-# MAIN APP
-# -----------------------------
-def main():
-    # Sidebar – professional text labels only
-    st.sidebar.title("Bivenue – Finance AI")
-    st.sidebar.write("Research • Transformation • Automation • SAP")
-
-    mode = st.sidebar.radio(
-        "Mode",
-        [
-            "Research",
-            "Finance Transformation",
-            "SOP Builder",
-            "Automation Analysis",
-            "Cost–Benefit Analysis",
-            "SAP Copilot",
-            "Deck Generator",
-        ],
-    )
-
-    # Centered header
-    st.markdown(
-        "<div class='biv-header-title'>Bivenue – Finance AI Copilot</div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        "<div class='biv-header-subtitle'>AI research and copilots for R2R, P2P, O2C, Close, Automation, and SAP.</div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown("<hr class='biv-divider' />", unsafe_allow_html=True)
-
-    # Route to sections
-    if mode == "Research":
-        research_ui()
-    elif mode == "Finance Transformation":
-        finance_ui()
-    elif mode == "SOP Builder":
-        sop_ui()
-    elif mode == "Automation Analysis":
-        automation_ui()
-    elif mode == "Cost–Benefit Analysis":
-        cba_ui()
-    elif mode == "SAP Copilot":
-        sap_ui()
-    elif mode == "Deck Generator":
-        deck_ui()
-
-
-# -----------------------------
 # UI Pages
 # -----------------------------
 def research_ui():
+    st.subheader("Research Mode")
+
+    # --- Show previous research conversation (chat history) ---
+    research_hist = [h for h in st.session_state["history"] if h.get("mode") == "Research"]
+
+    if research_hist:
+        st.markdown("##### Conversation")
+        for item in research_hist:
+            st.markdown(f"**You:** {item['question']}")
+            render_answer(item["answer"], "Research Answer")
+        st.markdown("---")
+
+    # --- Perplexity-style rounded search bar (single input) ---
+    st.markdown(
+        "<div class='biv-search-wrapper'><div class='biv-search-inner'>",
+        unsafe_allow_html=True,
+    )
+
+    query = st.text_input(
+        label="",
+        placeholder="Ask anything. Type your finance, automation, or SAP question.",
+        label_visibility="collapsed",
+        key="research_query",
+    )
+
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+    # Centered Search button
+    col = st.columns([3, 1, 3])[1]
+    run = col.button("Search")
+
+    if not run:
+        return
+
+    if not query.strip():
+        st.warning("Please enter a question.")
+        return
+
+    # --- Call research engine ---
+    with st.spinner("Researching…"):
+        res = answer_with_citations(query)
+
+    # --- Save to session history ---
+    st.session_state["history"].append(
+        {
+            "mode": "Research",
+            "question": query,
+            "answer": res["answer"],
+            "sources": res["sources"],
+        }
+    )
+
+    # Keep only last 20 entries
+    if len(st.session_state["history"]) > 20:
+        st.session_state["history"] = st.session_state["history"][-20:]
+
+    # Rerun so the new Q&A appears in the history section
+    st.rerun()
+
+
+def finance_ui():
+    st.subheader("Finance Transformation")
+
+    task = st.selectbox(
+        "Focus area",
+        ["R2R", "P2P", "O2C", "Close", "Audit", "Automation roadmap"],
+    )
+    context = st.text_area(
+        "Describe your current state, pain points, and objectives:",
+        height=200,
+    )
+
+    if st.button("Generate transformation plan"):
+        if not context.strip():
+            st.warning("Please describe your situation.")
+            return
+        with st.spinner("Designing transformation plan…"):
+            ans = finance_transform_answer(task, context)
+        render_answer(ans, "Transformation Plan")
+
+
 def sop_ui():
     st.subheader("SOP Builder")
 
@@ -614,6 +648,55 @@ def deck_ui():
         with st.spinner("Designing executive deck…"):
             ans = build_exec_deck(deck_type, ctx)
         render_answer(ans, "Executive Deck Outline")
+
+
+# -----------------------------
+# MAIN APP
+# -----------------------------
+def main():
+    # Sidebar
+    st.sidebar.title("Bivenue – Finance AI")
+    st.sidebar.write("Research • Transformation • Automation • SAP")
+
+    mode = st.sidebar.radio(
+        "Mode",
+        [
+            "Research",
+            "Finance Transformation",
+            "SOP Builder",
+            "Automation Analysis",
+            "Cost–Benefit Analysis",
+            "SAP Copilot",
+            "Deck Generator",
+        ],
+    )
+
+    # Centered header
+    st.markdown(
+        "<div class='biv-header-title'>Bivenue – Finance AI Copilot</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div class='biv-header-subtitle'>AI research and copilots for R2R, P2P, O2C, Close, Automation, and SAP.</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("<hr class='biv-divider' />", unsafe_allow_html=True)
+
+    # Route to sections
+    if mode == "Research":
+        research_ui()
+    elif mode == "Finance Transformation":
+        finance_ui()
+    elif mode == "SOP Builder":
+        sop_ui()
+    elif mode == "Automation Analysis":
+        automation_ui()
+    elif mode == "Cost–Benefit Analysis":
+        cba_ui()
+    elif mode == "SAP Copilot":
+        sap_ui()
+    elif mode == "Deck Generator":
+        deck_ui()
 
 
 # -----------------------------
