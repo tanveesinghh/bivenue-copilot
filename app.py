@@ -482,11 +482,24 @@ def main():
 def research_ui():
     st.subheader("Research Mode")
 
-    st.markdown("<div class='biv-search-wrapper'><div class='biv-search-inner'>", unsafe_allow_html=True)
-    query = st.text_input(" ", placeholder="Ask anything. Type your finance, automation, or SAP question.")
+    # Centered Perplexity-style search bar
+    st.markdown(
+        """
+        <div class='biv-search-wrapper'>
+            <div class='biv-search-inner'>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    query = st.text_input(
+        "",
+        placeholder="Ask anything… Type your finance, automation, or SAP question."
+    )
+
     st.markdown("</div></div>", unsafe_allow_html=True)
 
-    col = st.columns([1, 5, 1])[1]
+    # Search button centered
+    col = st.columns([3, 1, 3])[1]
     with col:
         if st.button("Search"):
             if not query.strip():
@@ -494,8 +507,10 @@ def research_ui():
                 return
             with st.spinner("Researching…"):
                 res = answer_with_citations(query)
+
             render_answer(res["answer"], "Research Answer")
             render_sources(res["sources"])
+
 
 
 def finance_ui():
