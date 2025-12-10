@@ -483,7 +483,7 @@ def main():
 def research_ui():
     st.subheader("Research Mode")
 
-    # --- Perplexity-style centered search bar (single input) ---
+    # --- Perplexity-style rounded search bar ---
     st.markdown(
         "<div class='biv-search-wrapper'><div class='biv-search-inner'>",
         unsafe_allow_html=True,
@@ -492,13 +492,13 @@ def research_ui():
     query = st.text_input(
         label="",
         placeholder="Ask anything. Type your finance, automation, or SAP question.",
-        label_visibility="collapsed",       # 👈 hides the label so no extra grey bar
+        label_visibility="collapsed",
         key="research_query",
     )
 
     st.markdown("</div></div>", unsafe_allow_html=True)
 
-    # --- Centered Search button only ---
+    # Centered Search button
     col = st.columns([3, 1, 3])[1]
     run = col.button("Search")
 
@@ -512,30 +512,11 @@ def research_ui():
     with st.spinner("Researching…"):
         res = answer_with_citations(query)
 
-    # --- Full-width, nicely centered answer card ---
-    st.markdown("<div style='max-width: 720px; margin: 1.5rem auto;'>", unsafe_allow_html=True)
+    # Professional centered answer container
+    st.markdown("<div style='max-width: 900px; margin: 2rem auto;'>", unsafe_allow_html=True)
     render_answer(res["answer"], "Research Answer")
     render_sources(res["sources"])
     st.markdown("</div>", unsafe_allow_html=True)
-def finance_ui():
-    st.subheader("Finance Transformation")
-
-    task = st.selectbox(
-        "Focus area",
-        ["R2R", "P2P", "O2C", "Close", "Audit", "Automation roadmap"],
-    )
-    context = st.text_area(
-        "Describe your current state, pain points, and objectives:",
-        height=200,
-    )
-
-    if st.button("Generate transformation plan"):
-        if not context.strip():
-            st.warning("Please describe your situation.")
-            return
-        with st.spinner("Designing transformation plan…"):
-            ans = finance_transform_answer(task, context)
-        render_answer(ans, "Transformation Plan")
 
 
 def sop_ui():
