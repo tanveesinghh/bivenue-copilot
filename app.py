@@ -25,6 +25,12 @@ st.set_page_config(
     page_icon="📊",
     layout="wide",
 )
+# -----------------------------
+# 💾 Session state – chat history
+# -----------------------------
+if "history" not in st.session_state:
+    # each item: {"mode": "Research", "question": str, "answer": str, "sources": [...]}
+    st.session_state["history"] = []
 
 # -----------------------------
 # 🎨 Global Styling (Perplexity-inspired)
@@ -481,44 +487,6 @@ def main():
 # UI Pages
 # -----------------------------
 def research_ui():
-    st.subheader("Research Mode")
-
-    # --- Perplexity-style rounded search bar ---
-    st.markdown(
-        "<div class='biv-search-wrapper'><div class='biv-search-inner'>",
-        unsafe_allow_html=True,
-    )
-
-    query = st.text_input(
-        label="",
-        placeholder="Ask anything. Type your finance, automation, or SAP question.",
-        label_visibility="collapsed",
-        key="research_query",
-    )
-
-    st.markdown("</div></div>", unsafe_allow_html=True)
-
-    # Centered Search button
-    col = st.columns([3, 1, 3])[1]
-    run = col.button("Search")
-
-    if not run:
-        return
-
-    if not query.strip():
-        st.warning("Please enter a question.")
-        return
-
-    with st.spinner("Researching…"):
-        res = answer_with_citations(query)
-
-    # Professional centered answer container
-    st.markdown("<div style='max-width: 900px; margin: 2rem auto;'>", unsafe_allow_html=True)
-    render_answer(res["answer"], "Research Answer")
-    render_sources(res["sources"])
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
 def sop_ui():
     st.subheader("SOP Builder")
 
